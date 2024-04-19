@@ -63,7 +63,7 @@ class HeaderNode(Node):
         out = f"<h{self.header_size}>"
         for child in self.children:
             out += child.html()
-        out += f"<h{self.header_size}>\n"
+        out += f"</h{self.header_size}>\n"
         return out
 
 
@@ -82,6 +82,24 @@ class EmphNode(Node):
         for child in self.children:
             out += child.html()
         out += "</em>"
+        return out
+
+
+@dataclass
+class BoldNode(Node):
+    children: list[Node]
+
+    def dump(self: Self, indent: int = 0) -> str:
+        out = (" " * indent * 4) + "BoldNode\n"
+        for child in self.children:
+            out += child.dump(indent + 1)
+        return out
+
+    def html(self: Self) -> str:
+        out = "<strong>"
+        for child in self.children:
+            out += child.html()
+        out += "</strong>"
         return out
 
 
