@@ -4,6 +4,8 @@ from src.meltdown import MarkdownParser
 
 blog = """
  Hello ~~boy~~ & **girl** dude!
+
+x[orf](https://orf.at)xx
 """
 md_tree = MarkdownParser().parse(blog)
 print("== DUMP ==")

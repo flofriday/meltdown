@@ -4,6 +4,7 @@ from src.meltdown.Nodes import (
     BoldNode,
     EmphNode,
     HeaderNode,
+    LinkNode,
     MarkdownTree,
     ParagraphNode,
     StrikeThroughNode,
@@ -20,8 +21,8 @@ class MarkdownParser:
         self._inside_emph: bool = False
         self._inside_bold: bool = False
         self._inside_strikethrough: bool = False
+        self._inside_link: bool = False
 
-        # Do magic here
         blocks = self._parse_blocks()
 
         return MarkdownTree(blocks)
@@ -33,6 +34,11 @@ class MarkdownParser:
             self._inside_emph = False
             self._inside_bold = False
             self._inside_strikethrough = False
+            self._inside_link: bool = False
+
+            # Skip newlines
+            while self._match("\n"):
+                pass
 
             if self._isHeaderStart():
                 counter = 0
@@ -96,18 +102,23 @@ class MarkdownParser:
                 start_index = self._index
                 end_index = self._index
 
+            if (not self._inside_link) and self._match("["):
+                children.append(TextNode(self._source[start_index:end_index]))
+                children += self._parse_link()
+                start_index = self._index
+                end_index = self._index
+
+            if self._inside_link and self._peek() == "]":
+                break
+
             if self._peek() == "\n":
                 if self._stop_newline:
-                    self._consume()
                     break
 
                 if self._peekn(1) == "\n":
-                    self._consume()
-                    self._consume()
                     break
 
                 if self._peekn(1) == "#":
-                    self._consume()
                     break
 
             self._consume()
@@ -119,7 +130,7 @@ class MarkdownParser:
             children.append(TextNode(text))
         return children
 
-    def _parse_bold(self: Self) -> [Node]:
+    def _parse_bold(self: Self) -> list[Node]:
         self._inside_bold = True
         children = self._parse_rich_text()
 
@@ -129,7 +140,7 @@ class MarkdownParser:
 
         return [TextNode("**")] + children
 
-    def _parse_emph(self: Self) -> [Node]:
+    def _parse_emph(self: Self) -> list[Node]:
         self._inside_emph = True
         children = self._parse_rich_text()
 
@@ -139,7 +150,7 @@ class MarkdownParser:
 
         return [TextNode("*")] + children
 
-    def _parse_strikethrough(self: Self) -> [Node]:
+    def _parse_strikethrough(self: Self) -> list[Node]:
         self._inside_strikethrough = True
         children = self._parse_rich_text()
 
@@ -148,6 +159,26 @@ class MarkdownParser:
             return [StrikeThroughNode(children)]
 
         return [TextNode("~~")] + children
+
+    def _parse_link(self: Self) -> list[Node]:
+        # Parsing the text to of the link
+        self._inside_link = True
+        children = self._parse_rich_text()
+
+        if not self._match("]("):
+            return [TextNode("[")] + children
+
+        # Parsing the url
+        stop_symbols = [")", " ", "\n", "\t", "\0"]
+        url = ""
+        while self._peek() not in stop_symbols:
+            url += self._consume()
+
+        if not self._match(")"):
+            return [TextNode("[")] + children + [TextNode("](" + url)]
+
+        self._inside_link = False
+        return [LinkNode(url, children)]
 
     def _isHeaderStart(self: Self) -> bool:
         if self._peek() != "#":

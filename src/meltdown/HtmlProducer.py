@@ -4,6 +4,8 @@ from src.meltdown.Nodes import (
     BoldNode,
     EmphNode,
     HeaderNode,
+    ImageNode,
+    LinkNode,
     MarkdownTree,
     MarkdownVisitor,
     ParagraphNode,
@@ -54,6 +56,17 @@ class HtmlProducer(MarkdownVisitor):
         for child in node.children:
             child.accept(self)
         self.output += "</strong>"
+
+    def visit_link(self: Self, node: LinkNode):
+        # FIXME: escape url
+        self.output += f'<a href="{node.url}">'
+        for child in node.children:
+            child.accept(self)
+        self.output += "</a>"
+
+    def visit_image(self: Self, node: ImageNode):
+        # FIXME: escape url
+        self.output += f'<img src="{node.url}" alt="{html.escape(node.description)}"/>'
 
     def visit_text(self: Self, node: TextNode):
         self.output += html.escape(node.text.replace("\n", " "))

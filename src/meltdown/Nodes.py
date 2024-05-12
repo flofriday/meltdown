@@ -13,7 +13,7 @@ class Node(ABC):
         pass
 
 
-@dataclass
+@dataclass(slots=True)
 class MarkdownTree:
     children: list[Node]
 
@@ -27,7 +27,7 @@ class MarkdownTree:
         return out
 
 
-@dataclass
+@dataclass(slots=True)
 class ParagraphNode(Node):
     children: list[Node]
 
@@ -41,7 +41,7 @@ class ParagraphNode(Node):
         return out
 
 
-@dataclass
+@dataclass(slots=True)
 class HeaderNode(Node):
     header_size: int
     children: list[Node]
@@ -56,7 +56,7 @@ class HeaderNode(Node):
         return out
 
 
-@dataclass
+@dataclass(slots=True)
 class EmphNode(Node):
     children: list[Node]
 
@@ -70,7 +70,7 @@ class EmphNode(Node):
         return out
 
 
-@dataclass
+@dataclass(slots=True)
 class StrikeThroughNode(Node):
     children: list[Node]
 
@@ -84,7 +84,7 @@ class StrikeThroughNode(Node):
         return out
 
 
-@dataclass
+@dataclass(slots=True)
 class BoldNode(Node):
     children: list[Node]
 
@@ -98,7 +98,39 @@ class BoldNode(Node):
         return out
 
 
-@dataclass
+@dataclass(slots=True)
+class LinkNode(Node):
+    url: str
+    children: list[Node]
+
+    def accept(self: Self, visitor: "MarkdownVisitor"):
+        visitor.visit_link(self)
+
+    def dump(self: Self, indent: int = 0) -> str:
+        out = (" " * indent * 4) + f"LinkNode url: {self.url}\n"
+        for child in self.children:
+            out += child.dump(indent + 1)
+        return out
+
+
+@dataclass(slots=True)
+class ImageNode(Node):
+    url: str
+    description: str
+
+    def accept(self: Self, visitor: "MarkdownVisitor"):
+        visitor.visit_image(self)
+
+    def dump(self: Self, indent: int = 0) -> str:
+        out = (
+            " " * indent * 4
+        ) + f"ImageNode url: {self.url}, description: '{self.description}'\n"
+        for child in self.children:
+            out += child.dump(indent + 1)
+        return out
+
+
+@dataclass(slots=True)
 class TextNode(Node):
     text: str
 
@@ -132,6 +164,14 @@ class MarkdownVisitor(ABC):
 
     @abstractmethod
     def visit_bold(self: Self, node: BoldNode):
+        pass
+
+    @abstractmethod
+    def visit_link(self: Self, node: LinkNode):
+        pass
+
+    @abstractmethod
+    def visit_image(self: Self, node: ImageNode):
         pass
 
     @abstractmethod
