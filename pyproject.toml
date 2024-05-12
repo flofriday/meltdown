@@ -1,0 +1,20 @@
+[project]
+name = "meltdown"
+version = "0.0.1"
+authors = [{ name = "flofriday", email = "flohacksfriday@gmail.com" }]
+description = "A markdown parser"
+readme = "README.md"
+requires-python = ">=3.12"
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+]
+
+[project.urls]
+Homepage = "https://github.com/flofriday/meltdown"
+Issues = "https://github.com/flofriday/meltdown/issues"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"

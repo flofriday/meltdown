@@ -45,7 +45,10 @@ class MarkdownParser:
                 counter = 0
                 while self._match("#"):
                     counter += 1
-                children.append(self._parse_header(counter))
+                if self._match(" "):
+                    children.append(self._parse_header(counter))
+                else:
+                    children.append(self._parse_paragraph(counter))
 
             else:
                 paragraph = self._parse_paragraph()
@@ -132,6 +135,8 @@ class MarkdownParser:
 
         if end_index is None:
             end_index = len(self._source) - 1
+        if self._is_eof():
+            end_index += 1
         if end_index > start_index:
             text = self._source[start_index:end_index]
             children.append(TextNode(text))
@@ -188,7 +193,7 @@ class MarkdownParser:
         return [LinkNode(url, children)]
 
     def _parse_image(self: Self) -> list[Node]:
-        alt_stop_symbols = ["]", " ", "\n", "\t", "\0"]
+        alt_stop_symbols = ["]", "\n", "\0"]
         alt = ""
         while self._peek() not in alt_stop_symbols:
             alt += self._consume()

@@ -9,6 +9,18 @@ sanitization library.
 
 ## Built it yourself
 
+While meltdown doesn't have any dependencies other than the standard library
+to use it, it needs pytest to be tested and some other libraries might be nice
+during development.
+
 ```bash
+python3 -m venv venv
+source venv/bin/activate
+pip install -r requirements.txt
 python3 main.py
+```
+
+## Run all tests
+```bash
+python -m pytest
 ```
