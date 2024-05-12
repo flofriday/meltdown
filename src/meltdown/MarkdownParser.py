@@ -4,6 +4,7 @@ from src.meltdown.Nodes import (
     BoldNode,
     EmphNode,
     HeaderNode,
+    ImageNode,
     LinkNode,
     MarkdownTree,
     ParagraphNode,
@@ -108,6 +109,12 @@ class MarkdownParser:
                 start_index = self._index
                 end_index = self._index
 
+            if self._match("!["):
+                children.append(TextNode(self._source[start_index:end_index]))
+                children += self._parse_image()
+                start_index = self._index
+                end_index = self._index
+
             if self._inside_link and self._peek() == "]":
                 break
 
@@ -179,6 +186,26 @@ class MarkdownParser:
 
         self._inside_link = False
         return [LinkNode(url, children)]
+
+    def _parse_image(self: Self) -> list[Node]:
+        alt_stop_symbols = ["]", " ", "\n", "\t", "\0"]
+        alt = ""
+        while self._peek() not in alt_stop_symbols:
+            alt += self._consume()
+
+        if not self._match("]("):
+            return [TextNode("![")] + children
+
+        # Parsing the url
+        url_stop_symbols = [")", " ", "\n", "\t", "\0"]
+        url = ""
+        while self._peek() not in url_stop_symbols:
+            url += self._consume()
+
+        if not self._match(")"):
+            return [TextNode("![")] + children + [TextNode("](" + url)]
+
+        return [ImageNode(url, alt)]
 
     def _isHeaderStart(self: Self) -> bool:
         if self._peek() != "#":

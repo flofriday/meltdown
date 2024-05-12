@@ -125,8 +125,6 @@ class ImageNode(Node):
         out = (
             " " * indent * 4
         ) + f"ImageNode url: {self.url}, description: '{self.description}'\n"
-        for child in self.children:
-            out += child.dump(indent + 1)
         return out
 
 
