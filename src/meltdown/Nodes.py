@@ -5,11 +5,11 @@ from typing import Self
 
 class Node(ABC):
     @abstractmethod
-    def dump(self: Self, indent: int = 0) -> str:
+    def accept(self: Self, visitor: "MarkdownVisitor"):
         pass
 
     @abstractmethod
-    def html(self: Self) -> str:
+    def dump(self: Self, indent: int = 0) -> str:
         pass
 
 
@@ -17,16 +17,13 @@ class Node(ABC):
 class MarkdownTree:
     children: list[Node]
 
+    def accept(self: Self, visitor: "MarkdownVisitor"):
+        visitor.visit_tree(self)
+
     def dump(self: Self) -> str:
         out = "MarkdownTree\n"
         for child in self.children:
             out += child.dump(1)
-        return out
-
-    def html(self: Self) -> str:
-        out = ""
-        for child in self.children:
-            out += child.html()
         return out
 
 
@@ -34,17 +31,13 @@ class MarkdownTree:
 class ParagraphNode(Node):
     children: list[Node]
 
+    def accept(self: Self, visitor: "MarkdownVisitor"):
+        visitor.visit_paragraph(self)
+
     def dump(self: Self, indent: int = 0) -> str:
         out = (" " * indent * 4) + "Paragraph\n"
         for child in self.children:
             out += child.dump(indent + 1)
-        return out
-
-    def html(self: Self) -> str:
-        out = "<p>"
-        for child in self.children:
-            out += child.html()
-        out += "</p>\n"
         return out
 
 
@@ -53,17 +46,13 @@ class HeaderNode(Node):
     header_size: int
     children: list[Node]
 
+    def accept(self: Self, visitor: "MarkdownVisitor"):
+        visitor.visit_header(self)
+
     def dump(self: Self, indent: int = 0) -> str:
         out = (" " * indent * 4) + f"HeaderNode size:{self.header_size}\n"
         for child in self.children:
             out += child.dump(indent + 1)
-        return out
-
-    def html(self: Self) -> str:
-        out = f"<h{self.header_size}>"
-        for child in self.children:
-            out += child.html()
-        out += f"</h{self.header_size}>\n"
         return out
 
 
@@ -71,17 +60,27 @@ class HeaderNode(Node):
 class EmphNode(Node):
     children: list[Node]
 
+    def accept(self: Self, visitor: "MarkdownVisitor"):
+        visitor.visit_emph(self)
+
     def dump(self: Self, indent: int = 0) -> str:
         out = (" " * indent * 4) + "EmphNode\n"
         for child in self.children:
             out += child.dump(indent + 1)
         return out
 
-    def html(self: Self) -> str:
-        out = "<em>"
+
+@dataclass
+class StrikeThroughNode(Node):
+    children: list[Node]
+
+    def accept(self: Self, visitor: "MarkdownVisitor"):
+        visitor.visit_strikethrough(self)
+
+    def dump(self: Self, indent: int = 0) -> str:
+        out = (" " * indent * 4) + "StrikeThroughNode\n"
         for child in self.children:
-            out += child.html()
-        out += "</em>"
+            out += child.dump(indent + 1)
         return out
 
 
@@ -89,17 +88,13 @@ class EmphNode(Node):
 class BoldNode(Node):
     children: list[Node]
 
+    def accept(self: Self, visitor: "MarkdownVisitor"):
+        visitor.visit_bold(self)
+
     def dump(self: Self, indent: int = 0) -> str:
         out = (" " * indent * 4) + "BoldNode\n"
         for child in self.children:
             out += child.dump(indent + 1)
-        return out
-
-    def html(self: Self) -> str:
-        out = "<strong>"
-        for child in self.children:
-            out += child.html()
-        out += "</strong>"
         return out
 
 
@@ -107,8 +102,38 @@ class BoldNode(Node):
 class TextNode(Node):
     text: str
 
+    def accept(self: Self, visitor: "MarkdownVisitor"):
+        visitor.visit_text(self)
+
     def dump(self: Self, indent: int = 0) -> str:
         return (" " * indent * 4) + f'TextNode "{self.text}"\n'
 
-    def html(self: Self) -> str:
-        return self.text
+
+class MarkdownVisitor(ABC):
+    @abstractmethod
+    def visit_tree(self: Self, node: MarkdownTree):
+        pass
+
+    @abstractmethod
+    def visit_paragraph(self: Self, node: ParagraphNode):
+        pass
+
+    @abstractmethod
+    def visit_header(self: Self, node: HeaderNode):
+        pass
+
+    @abstractmethod
+    def visit_emph(self: Self, node: EmphNode):
+        pass
+
+    @abstractmethod
+    def visit_strikethrough(self: Self, node: StrikeThroughNode):
+        pass
+
+    @abstractmethod
+    def visit_bold(self: Self, node: BoldNode):
+        pass
+
+    @abstractmethod
+    def visit_text(self: Self, node: TextNode):
+        pass

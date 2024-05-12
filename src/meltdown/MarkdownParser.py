@@ -6,6 +6,7 @@ from src.meltdown.Nodes import (
     HeaderNode,
     MarkdownTree,
     ParagraphNode,
+    StrikeThroughNode,
     TextNode,
     Node,
 )
@@ -18,6 +19,7 @@ class MarkdownParser:
         self._stop_newline: bool = False
         self._inside_emph: bool = False
         self._inside_bold: bool = False
+        self._inside_strikethrough: bool = False
 
         # Do magic here
         blocks = self._parse_blocks()
@@ -30,6 +32,7 @@ class MarkdownParser:
             self._stop_newline = False
             self._inside_emph = False
             self._inside_bold = False
+            self._inside_strikethrough = False
 
             if self._isHeaderStart():
                 counter = 0
@@ -38,7 +41,9 @@ class MarkdownParser:
                 children.append(self._parse_header(counter))
 
             else:
-                children.append(self._parse_paragraph())
+                paragraph = self._parse_paragraph()
+                if paragraph.children != []:
+                    children.append(paragraph)
 
         return children
 
@@ -80,6 +85,16 @@ class MarkdownParser:
                     children += self._parse_emph()
                     start_index = self._index
                     end_index = self._index
+
+            if self._peek() == "~" and self._peekn(1) == "~":
+                if self._inside_strikethrough:
+                    break
+                self._consume()
+                self._consume()
+                children.append(TextNode(self._source[start_index:end_index]))
+                children += self._parse_strikethrough()
+                start_index = self._index
+                end_index = self._index
 
             if self._peek() == "\n":
                 if self._stop_newline:
@@ -123,6 +138,16 @@ class MarkdownParser:
             return [EmphNode(children)]
 
         return [TextNode("*")] + children
+
+    def _parse_strikethrough(self: Self) -> [Node]:
+        self._inside_strikethrough = True
+        children = self._parse_rich_text()
+
+        if self._match("~~"):
+            self._inside_strikethrough = False
+            return [StrikeThroughNode(children)]
+
+        return [TextNode("~~")] + children
 
     def _isHeaderStart(self: Self) -> bool:
         if self._peek() != "#":
