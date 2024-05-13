@@ -70,7 +70,14 @@ class MarkdownParser:
     def _parse_rich_text(self: Self) -> list[Node]:
         children: list[Node] = []
 
+        def end_current_text():
+            text = self._source[start_index:end_index]
+            if text == "":
+                return
+            children.append(TextNode(text))
+
         start_index = self._index
+        end_index = self._index
         while not self._is_eof():
             end_index = self._index
 
@@ -81,42 +88,47 @@ class MarkdownParser:
                         break
                     self._consume()
                     self._consume()
-                    children.append(TextNode(self._source[start_index:end_index]))
+                    end_current_text()
                     children += self._parse_bold()
                     start_index = self._index
                     end_index = self._index
+                    continue
 
                 else:
                     # Emphasis, only one star
                     if self._inside_emph:
                         break
                     self._consume()
-                    children.append(TextNode(self._source[start_index:end_index]))
+                    end_current_text()
                     children += self._parse_emph()
                     start_index = self._index
                     end_index = self._index
+                    continue
 
             if self._peek() == "~" and self._peekn(1) == "~":
                 if self._inside_strikethrough:
                     break
                 self._consume()
                 self._consume()
-                children.append(TextNode(self._source[start_index:end_index]))
+                end_current_text()
                 children += self._parse_strikethrough()
                 start_index = self._index
                 end_index = self._index
+                continue
 
             if (not self._inside_link) and self._match("["):
-                children.append(TextNode(self._source[start_index:end_index]))
+                end_current_text()
                 children += self._parse_link()
                 start_index = self._index
                 end_index = self._index
+                continue
 
             if self._match("!["):
-                children.append(TextNode(self._source[start_index:end_index]))
+                end_current_text()
                 children += self._parse_image()
                 start_index = self._index
                 end_index = self._index
+                continue
 
             if self._inside_link and self._peek() == "]":
                 break
@@ -177,8 +189,11 @@ class MarkdownParser:
         self._inside_link = True
         children = self._parse_rich_text()
 
-        if not self._match("]("):
+        if not self._match("]"):
             return [TextNode("[")] + children
+
+        if not self._match("("):
+            return [TextNode("[")] + children + [TextNode("]")]
 
         # Parsing the url
         stop_symbols = [")", " ", "\n", "\t", "\0"]
@@ -187,7 +202,9 @@ class MarkdownParser:
             url += self._consume()
 
         if not self._match(")"):
-            return [TextNode("[")] + children + [TextNode("](" + url)]
+            # Reset parsing position
+            self._index -= len(url)
+            return [TextNode("[")] + children + [TextNode("](")]
 
         self._inside_link = False
         return [LinkNode(url, children)]
@@ -199,7 +216,9 @@ class MarkdownParser:
             alt += self._consume()
 
         if not self._match("]("):
-            return [TextNode("![")] + children
+            # resetting the parsing position
+            self._index -= len(alt)
+            return [TextNode("![")]
 
         # Parsing the url
         url_stop_symbols = [")", " ", "\n", "\t", "\0"]
@@ -208,7 +227,9 @@ class MarkdownParser:
             url += self._consume()
 
         if not self._match(")"):
-            return [TextNode("![")] + children + [TextNode("](" + url)]
+            # resetting the parsing position
+            self._index -= len(url)
+            return [TextNode("![")] + alt + [TextNode("](")]
 
         return [ImageNode(url, alt)]
 

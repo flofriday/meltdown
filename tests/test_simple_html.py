@@ -73,3 +73,51 @@ def test_multiple_paragraphs():
 
 World"""
     assert "<p>Hello</p><p>World</p>" in produce(src).replace("\n", "")
+
+
+def test_star_not_emph():
+    src = "hello *there"
+    assert "<p>hello *there</p>" in produce(src)
+
+
+def test_doublestar_not_bold():
+    src = "hello **there"
+    assert "<p>hello **there</p>" in produce(src)
+
+
+def test_doublewave_not_strikethrough():
+    src = "hello ~~there"
+    assert "<p>hello ~~there</p>" in produce(src)
+
+
+def test_parenthesis_not_link():
+    src = "Welcome today (13.may) at this unit test."
+    assert "<p>Welcome today (13.may) at this unit test.</p>" in produce(src)
+
+
+def test_brackets_not_link():
+    src = "I like [angles]."
+    assert "<p>I like [angles].</p>" in produce(src)
+
+
+def test_brackets_not_link():
+    src = "I like [angles]."
+    assert "<p>I like [angles].</p>" in produce(src)
+
+
+def test_missing_closing_link():
+    src = "I like [examples](https://example.com."
+    assert "<p>I like [examples](https://example.com.</p>" in produce(src)
+
+
+def test_missing_closing_link_formatted():
+    src = "I like [examples](https://**example.com**."
+    assert "<p>I like [examples](https://<strong>example.com</strong>.</p>" in produce(
+        src
+    )
+
+
+def test_unclosed_bracket_in_strikethrough():
+    src = "Hi ~~[there~~"
+    expected = "<p>Hi <del>[there</del></p>"
+    assert expected in produce(src)
