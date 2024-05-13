@@ -2,6 +2,7 @@ from dataclasses import dataclass
 from typing import Self
 from src.meltdown.Nodes import (
     BoldNode,
+    CodeNode,
     EmphNode,
     HeaderNode,
     ImageNode,
@@ -21,6 +22,7 @@ class MarkdownParser:
         self._stop_newline: bool = False
         self._inside_emph: bool = False
         self._inside_bold: bool = False
+        self._inside_code: bool = False
         self._inside_strikethrough: bool = False
         self._inside_link: bool = False
 
@@ -34,6 +36,7 @@ class MarkdownParser:
             self._stop_newline = False
             self._inside_emph = False
             self._inside_bold = False
+            self._inside_code = False
             self._inside_strikethrough = False
             self._inside_link: bool = False
 
@@ -116,6 +119,16 @@ class MarkdownParser:
                 end_index = self._index
                 continue
 
+            if self._peek() == "`":
+                if self._inside_code:
+                    break
+                self._consume()
+                end_current_text()
+                children += self._parse_code()
+                start_index = self._index
+                end_index = self._index
+                continue
+
             if (not self._inside_link) and self._match("["):
                 end_current_text()
                 children += self._parse_link()
@@ -183,6 +196,19 @@ class MarkdownParser:
             return [StrikeThroughNode(children)]
 
         return [TextNode("~~")] + children
+
+    def _parse_code(self: Self) -> list[Node]:
+        self._inside_code = True
+        stop_symbols = ["`", "\n", "\0"]
+        code = ""
+        while self._peek() not in stop_symbols:
+            code += self._consume()
+
+        if not self._match("`"):
+            return [TextNode("`" + code)]
+
+        self._inside_bold = False
+        return [CodeNode(code)]
 
     def _parse_link(self: Self) -> list[Node]:
         # Parsing the text to of the link

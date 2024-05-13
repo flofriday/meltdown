@@ -55,6 +55,11 @@ def test_strike_through():
     assert "<p>Hi <del>guys</del> people</p>" in produce(src)
 
 
+def test_inline_code():
+    src = "Have you seen `T ** a;` in C before?"
+    assert "<p>Have you seen <code>T ** a;</code> in C before?</p>" in produce(src)
+
+
 def test_link():
     src = "[Homepage](https://flofriday.dev)"
     assert '<p><a href="https://flofriday.dev">Homepage</a></p>' in produce(src)

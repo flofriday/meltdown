@@ -2,6 +2,7 @@ import html
 from typing import Self
 from src.meltdown.Nodes import (
     BoldNode,
+    CodeNode,
     EmphNode,
     HeaderNode,
     ImageNode,
@@ -56,6 +57,9 @@ class HtmlProducer(MarkdownVisitor):
         for child in node.children:
             child.accept(self)
         self.output += "</strong>"
+
+    def visit_code(self: Self, node: CodeNode):
+        self.output += f"<code>{html.escape(node.code)}</code>"
 
     def visit_link(self: Self, node: LinkNode):
         # FIXME: escape url

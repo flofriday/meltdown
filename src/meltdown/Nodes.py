@@ -99,6 +99,17 @@ class BoldNode(Node):
 
 
 @dataclass(slots=True)
+class CodeNode(Node):
+    code: str
+
+    def accept(self: Self, visitor: "MarkdownVisitor"):
+        visitor.visit_code(self)
+
+    def dump(self: Self, indent: int = 0) -> str:
+        return (" " * indent * 4) + f"CodeNode code:'{self.code}'\n"
+
+
+@dataclass(slots=True)
 class LinkNode(Node):
     url: str
     children: list[Node]
@@ -162,6 +173,10 @@ class MarkdownVisitor(ABC):
 
     @abstractmethod
     def visit_bold(self: Self, node: BoldNode):
+        pass
+
+    @abstractmethod
+    def visit_code(self: Self, node: CodeNode):
         pass
 
     @abstractmethod
