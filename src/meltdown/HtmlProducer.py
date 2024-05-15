@@ -2,6 +2,7 @@ import html
 from typing import Self
 from src.meltdown.Nodes import (
     BoldNode,
+    CodeBlockNode,
     CodeNode,
     EmphNode,
     HeaderNode,
@@ -39,6 +40,14 @@ class HtmlProducer(MarkdownVisitor):
         for child in node.children:
             child.accept(self)
         self.output += f"</h{node.header_size}>\n"
+
+    def visit_code_block(self: Self, node: CodeBlockNode):
+        self.output += "<pre"
+        if node.language is not None:
+            self.output += f' class="{node.language}"'
+        self.output += "><code>"
+        self.output += html.escape(node.code)
+        self.output += "</code></pre>\n"
 
     def visit_emph(self: Self, node: EmphNode):
         self.output += "<em>"

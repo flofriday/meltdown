@@ -40,6 +40,17 @@ def test_header6():
     assert "<h6>Tiny header</h6>" in produce(src)
 
 
+def test_code_block():
+    src = """
+```golang
+a := "flotschi"
+x = y
+```
+"""
+    expected = '<pre class="golang"><code>a := &quot;flotschi&quot;\nx = y</code></pre>'
+    assert expected in produce(src)
+
+
 def test_bold_double_star():
     src = "Hi **there** dude"
     assert "<p>Hi <strong>there</strong> dude</p>" in produce(src)

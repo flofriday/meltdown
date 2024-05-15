@@ -2,6 +2,7 @@ from dataclasses import dataclass
 from typing import Self
 from src.meltdown.Nodes import (
     BoldNode,
+    CodeBlockNode,
     CodeNode,
     EmphNode,
     HeaderNode,
@@ -53,6 +54,13 @@ class MarkdownParser:
                 else:
                     children.append(self._parse_paragraph(counter))
 
+            if self._match("```"):
+                counter = 3
+                while self._match("`"):
+                    counter += 1
+
+                children += self._parse_code_block(counter)
+
             else:
                 paragraph = self._parse_paragraph()
                 if paragraph.children != []:
@@ -65,6 +73,30 @@ class MarkdownParser:
         children = self._parse_rich_text()
         self._stop_newline = False
         return HeaderNode(header_size, children)
+
+    def _parse_code_block(self, fence_size: int) -> list[Node]:
+        fence = "`" * fence_size
+        start_index = self._index
+
+        language = self._consume_till(["\n", "\0"]).strip()
+        if language == "":
+            language = None
+
+        if not self._match("\n"):
+            return [TextNode(fence + language)]
+
+        code = ""
+        while not self._is_eof() and not self._match(fence):
+            code += self._consume()
+
+        if self._is_eof():
+            # Rewind and parse as paragraph
+            self._index = start_index
+            rest = self._parse_paragraph()
+            rest.children = [TextNode(fence)] + rest.children
+            return [rest]
+
+        return [CodeBlockNode(language, code.strip())]
 
     def _parse_paragraph(self: Self) -> ParagraphNode:
         children = self._parse_rich_text()
@@ -199,10 +231,9 @@ class MarkdownParser:
 
     def _parse_code(self: Self) -> list[Node]:
         self._inside_code = True
+
         stop_symbols = ["`", "\n", "\0"]
-        code = ""
-        while self._peek() not in stop_symbols:
-            code += self._consume()
+        code = self._consume_till(stop_symbols)
 
         if not self._match("`"):
             return [TextNode("`" + code)]
@@ -223,9 +254,7 @@ class MarkdownParser:
 
         # Parsing the url
         stop_symbols = [")", " ", "\n", "\t", "\0"]
-        url = ""
-        while self._peek() not in stop_symbols:
-            url += self._consume()
+        url = self._consume_till(stop_symbols)
 
         if not self._match(")"):
             # Reset parsing position
@@ -237,9 +266,7 @@ class MarkdownParser:
 
     def _parse_image(self: Self) -> list[Node]:
         alt_stop_symbols = ["]", "\n", "\0"]
-        alt = ""
-        while self._peek() not in alt_stop_symbols:
-            alt += self._consume()
+        alt = self._consume_till(alt_stop_symbols)
 
         if not self._match("]("):
             # resetting the parsing position
@@ -248,9 +275,7 @@ class MarkdownParser:
 
         # Parsing the url
         url_stop_symbols = [")", " ", "\n", "\t", "\0"]
-        url = ""
-        while self._peek() not in url_stop_symbols:
-            url += self._consume()
+        url = self._consume_till(url_stop_symbols)
 
         if not self._match(")"):
             # resetting the parsing position
@@ -274,6 +299,12 @@ class MarkdownParser:
 
     def _is_eof(self: Self) -> bool:
         return self._index >= len(self._source)
+
+    def _consume_till(self: Self, stop_symbols: list[str]) -> str:
+        out = ""
+        while self._peek() not in stop_symbols:
+            out += self._consume()
+        return out
 
     def _consume(self: Self) -> str:
         if self._is_eof():

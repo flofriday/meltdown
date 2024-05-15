@@ -1,6 +1,6 @@
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import Self
+from typing import Optional, Self
 
 
 class Node(ABC):
@@ -54,6 +54,21 @@ class HeaderNode(Node):
         for child in self.children:
             out += child.dump(indent + 1)
         return out
+
+
+@dataclass(slots=True)
+class CodeBlockNode(Node):
+    language: Optional[str]
+    code: str
+
+    def accept(self: Self, visitor: "MarkdownVisitor"):
+        visitor.visit_code_block(self)
+
+    def dump(self: Self, indent: int = 0) -> str:
+        # FIXME: The code should be better formatted here.
+        return (
+            " " * indent * 4
+        ) + f'CodeBlock language:{self.language} code:"{self.code}"\n'
 
 
 @dataclass(slots=True)
@@ -161,6 +176,10 @@ class MarkdownVisitor(ABC):
 
     @abstractmethod
     def visit_header(self: Self, node: HeaderNode):
+        pass
+
+    @abstractmethod
+    def visit_code_block(self: Self, node: CodeBlockNode):
         pass
 
     @abstractmethod

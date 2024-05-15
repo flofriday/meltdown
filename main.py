@@ -3,9 +3,10 @@ from src.meltdown import MarkdownParser
 
 
 blog = """
- Hello ~~boy~~ & **girl** dude!
-
-x[orf](https://orf.at)xx
+```golang
+a := "flotschi"
+x = y
+```
 """
 md_tree = MarkdownParser().parse(blog)
 print("== DUMP ==")
@@ -19,7 +20,6 @@ with open("out.html", "w") as f:
     f.write("<html>\n")
     f.write(html)
     f.write("</html>\n")
-
 # MarkdownTree
 #     TextNode "Hi I am "
 #     BoldNode
