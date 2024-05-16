@@ -44,18 +44,15 @@ class MarkdownParser:
 
         self._consume_while(["\n", " "])
 
-        print("FLOOO")
         while not self._match("---") and not self._is_eof():
             line = self._consume_till(["\n", "\0"])
             self._consume_while(["\n", " "])
             if line.strip() == "":
                 continue
 
-            print(f"'{line}'")
             parts = line.split(":")
             if len(parts) != 2:
                 # Malformed frontmatter, rewind and parse as paragraph
-                print("exit A")
                 self._index = start_index
                 return {}
 
@@ -63,7 +60,6 @@ class MarkdownParser:
 
         if self._is_eof():
             # Malformed frontmatter, rewind and parse as paragraph
-            print("exit B")
             self._index = start_index
             return {}
 
@@ -164,7 +160,7 @@ class MarkdownParser:
                     self._consume()
                     self._consume()
                     end_current_text()
-                    children += self._parse_bold()
+                    children += self._parse_bold("**")
                     start_index = self._index
                     end_index = self._index
                     continue
@@ -175,10 +171,35 @@ class MarkdownParser:
                         break
                     self._consume()
                     end_current_text()
-                    children += self._parse_emph()
+                    children += self._parse_emph("*")
                     start_index = self._index
                     end_index = self._index
                     continue
+
+            if self._peek() == "_":
+                if self._peekn(1) == "_":
+                    if self._inside_bold and self._peekn(2) in ["\0", " ", "\t", "\n"]:
+                        break
+
+                    if self._previous() in ["\0", " ", "\t", "\n"]:
+                        self._consume()
+                        self._consume()
+                        end_current_text()
+                        children += self._parse_bold("__")
+                        start_index = self._index
+                        end_index = self._index
+                        continue
+                else:
+                    if self._inside_emph and self._peekn(1) in ["\0", " ", "\t", "\n"]:
+                        break
+
+                    if self._previous() in ["\0", " ", "\t", "\n"]:
+                        self._consume()
+                        end_current_text()
+                        children += self._parse_emph("_")
+                        start_index = self._index
+                        end_index = self._index
+                        continue
 
             if self._peek() == "~" and self._peekn(1) == "~":
                 if self._inside_strikethrough:
@@ -239,25 +260,25 @@ class MarkdownParser:
             children.append(TextNode(text))
         return children
 
-    def _parse_bold(self: Self) -> list[Node]:
+    def _parse_bold(self: Self, start_token: str) -> list[Node]:
         self._inside_bold = True
         children = self._parse_rich_text()
 
-        if self._match("**"):
+        if self._match(start_token):
             self._inside_bold = False
             return [BoldNode(children)]
 
-        return [TextNode("**")] + children
+        return [TextNode(start_token)] + children
 
-    def _parse_emph(self: Self) -> list[Node]:
+    def _parse_emph(self: Self, start_token: str) -> list[Node]:
         self._inside_emph = True
         children = self._parse_rich_text()
 
-        if self._match("*"):
+        if self._match(start_token):
             self._inside_emph = False
             return [EmphNode(children)]
 
-        return [TextNode("*")] + children
+        return [TextNode(start_token)] + children
 
     def _parse_strikethrough(self: Self) -> list[Node]:
         self._inside_strikethrough = True
@@ -381,3 +402,9 @@ class MarkdownParser:
             return "\0"
 
         return self._source[self._index + n]
+
+    def _previous(self: Self) -> str:
+        if self._index == 0:
+            return "\0"
+
+        return self._source[self._index - 1]

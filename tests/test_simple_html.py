@@ -56,8 +56,18 @@ def test_bold_double_star():
     assert "<p>Hi <strong>there</strong> dude</p>" in produce(src)
 
 
+def test_bold_double_underline():
+    src = "Hi __there__ dude"
+    assert "<p>Hi <strong>there</strong> dude</p>" in produce(src)
+
+
 def test_emph_star():
     src = "I *really* like you"
+    assert "<p>I <em>really</em> like you</p>" in produce(src)
+
+
+def test_emph_underline():
+    src = "I _really_ like you"
     assert "<p>I <em>really</em> like you</p>" in produce(src)
 
 
@@ -116,9 +126,29 @@ def test_star_not_emph():
     assert "<p>hello *there</p>" in produce(src)
 
 
+def test_underline_not_emph():
+    src = "hello _there"
+    assert "<p>hello _there</p>" in produce(src)
+
+
+def test_underline_in_word_not_emph():
+    src = "hello world_there_"
+    assert "<p>hello world_there_</p>" in produce(src)
+
+
 def test_doublestar_not_bold():
     src = "hello **there"
     assert "<p>hello **there</p>" in produce(src)
+
+
+def test_doubleunderline_not_bold():
+    src = "hello __there"
+    assert "<p>hello __there</p>" in produce(src)
+
+
+def test_doubleunderline_in_word_not_bold():
+    src = "hello word__there__"
+    assert "<p>hello word__there__</p>" in produce(src)
 
 
 def test_doublewave_not_strikethrough():
