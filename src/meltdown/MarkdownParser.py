@@ -27,9 +27,47 @@ class MarkdownParser:
         self._inside_strikethrough: bool = False
         self._inside_link: bool = False
 
+        metadata = self._parse_frontmatter()
         blocks = self._parse_blocks()
 
-        return MarkdownTree(blocks)
+        return MarkdownTree(metadata, blocks)
+
+    def _parse_frontmatter(self: Self) -> dict[str, str]:
+        """A incomplete yaml like frontmatter parser but it only supports top
+        level fields."""
+
+        metadata = {}
+        start_index = self._index
+        self._consume_while(["\n"])
+        if not self._match("---"):
+            return metadata
+
+        self._consume_while(["\n", " "])
+
+        print("FLOOO")
+        while not self._match("---") and not self._is_eof():
+            line = self._consume_till(["\n", "\0"])
+            self._consume_while(["\n", " "])
+            if line.strip() == "":
+                continue
+
+            print(f"'{line}'")
+            parts = line.split(":")
+            if len(parts) != 2:
+                # Malformed frontmatter, rewind and parse as paragraph
+                print("exit A")
+                self._index = start_index
+                return {}
+
+            metadata[parts[0].strip()] = parts[1].strip()
+
+        if self._is_eof():
+            # Malformed frontmatter, rewind and parse as paragraph
+            print("exit B")
+            self._index = start_index
+            return {}
+
+        return metadata
 
     def _parse_blocks(self: Self) -> list[Node]:
         children: list[Node] = []
@@ -42,8 +80,7 @@ class MarkdownParser:
             self._inside_link: bool = False
 
             # Skip newlines
-            while self._match("\n"):
-                pass
+            self._consume_while(["\n"])
 
             if self._isHeaderStart():
                 counter = 0
@@ -51,8 +88,10 @@ class MarkdownParser:
                     counter += 1
                 if self._match(" "):
                     children.append(self._parse_header(counter))
+                    continue
                 else:
                     children.append(self._parse_paragraph(counter))
+                    continue
 
             if self._match("```"):
                 counter = 3
@@ -60,6 +99,7 @@ class MarkdownParser:
                     counter += 1
 
                 children += self._parse_code_block(counter)
+                continue
 
             else:
                 paragraph = self._parse_paragraph()
@@ -299,6 +339,12 @@ class MarkdownParser:
 
     def _is_eof(self: Self) -> bool:
         return self._index >= len(self._source)
+
+    def _consume_while(self: Self, symbols: list[str]) -> str:
+        out = ""
+        while self._peek() in symbols:
+            out += self._consume()
+        return out
 
     def _consume_till(self: Self, stop_symbols: list[str]) -> str:
         out = ""

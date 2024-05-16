@@ -15,13 +15,14 @@ class Node(ABC):
 
 @dataclass(slots=True)
 class MarkdownTree:
+    metadata: dict[str, str]
     children: list[Node]
 
     def accept(self: Self, visitor: "MarkdownVisitor"):
         visitor.visit_tree(self)
 
     def dump(self: Self) -> str:
-        out = "MarkdownTree\n"
+        out = f"MarkdownTree metadata:{self.metadata}\n"
         for child in self.children:
             out += child.dump(1)
         return out

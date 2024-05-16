@@ -91,6 +91,26 @@ World"""
     assert "<p>Hello</p><p>World</p>" in produce(src).replace("\n", "")
 
 
+def test_frontmatter():
+    src = """
+---
+author: flofriday
+title : An exciting test
+
+ date: 2024-05-16
+---
+# Hello there"""
+    expected = "<h1>Hello there</h1>\n"
+    assert expected == produce(src)
+
+    ast = MarkdownParser().parse(src)
+    assert ast.metadata == {
+        "author": "flofriday",
+        "title": "An exciting test",
+        "date": "2024-05-16",
+    }
+
+
 def test_star_not_emph():
     src = "hello *there"
     assert "<p>hello *there</p>" in produce(src)
