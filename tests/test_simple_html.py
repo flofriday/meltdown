@@ -50,10 +50,12 @@ x = y
     expected = '<pre class="golang"><code>a := &quot;flotschi&quot;\nx = y</code></pre>'
     assert expected in produce(src)
 
+
 def test_quote_block():
-    src ="> **Note:** This isn't quite correct!"
+    src = "> **Note:** This isn't quite correct!"
     expected = "<blockquote> <strong>Note:</strong> This isn&#x27;t quite correct!</blockquote>"
     assert expected in produce(src)
+
 
 def test_bold_double_star():
     src = "Hi **there** dude"
@@ -83,6 +85,11 @@ def test_strike_through():
 def test_inline_code():
     src = "Have you seen `T ** a;` in C before?"
     assert "<p>Have you seen <code>T ** a;</code> in C before?</p>" in produce(src)
+
+
+def test_comment():
+    src = "Have you seen the <!-- boo & woo --> ghost?"
+    assert "<p>Have you seen the <!-- boo & woo --> ghost?</p>" in produce(src)
 
 
 def test_link():
@@ -170,11 +177,6 @@ def test_brackets_not_link():
     assert "<p>I like [angles].</p>" in produce(src)
 
 
-def test_brackets_not_link():
-    src = "I like [angles]."
-    assert "<p>I like [angles].</p>" in produce(src)
-
-
 def test_missing_closing_link():
     src = "I like [examples](https://example.com."
     assert "<p>I like [examples](https://example.com.</p>" in produce(src)
@@ -190,4 +192,10 @@ def test_missing_closing_link_formatted():
 def test_unclosed_bracket_in_strikethrough():
     src = "Hi ~~[there~~"
     expected = "<p>Hi <del>[there</del></p>"
+    assert expected in produce(src)
+
+
+def test_unclosed_comment_in_strikethrough():
+    src = "Hi ~~<!--there~~"
+    expected = "<p>Hi <del>&lt;!--there</del></p>"
     assert expected in produce(src)

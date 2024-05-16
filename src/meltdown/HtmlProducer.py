@@ -3,6 +3,7 @@ from typing import Self
 from src.meltdown.Nodes import (
     BoldNode,
     CodeBlockNode,
+    CommentNode,
     QuoteBlockNode,
     CodeNode,
     EmphNode,
@@ -56,7 +57,6 @@ class HtmlProducer(MarkdownVisitor):
             child.accept(self)
         self.output += "</blockquote>"
 
-
     def visit_emph(self: Self, node: EmphNode):
         self.output += "<em>"
         for child in node.children:
@@ -91,3 +91,6 @@ class HtmlProducer(MarkdownVisitor):
 
     def visit_text(self: Self, node: TextNode):
         self.output += html.escape(node.text.replace("\n", " "))
+
+    def visit_comment(self: Self, node: CommentNode):
+        self.output += "<!--" + node.comment + "-->"

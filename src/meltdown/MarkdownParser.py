@@ -3,6 +3,7 @@ from typing import Self
 from src.meltdown.Nodes import (
     BoldNode,
     CodeBlockNode,
+    CommentNode,
     QuoteBlockNode,
     CodeNode,
     EmphNode,
@@ -102,7 +103,6 @@ class MarkdownParser:
                 children.append(self._parse_quote_block())
                 continue
 
-            
             paragraph = self._parse_paragraph()
             if paragraph.children != []:
                 children.append(paragraph)
@@ -140,7 +140,7 @@ class MarkdownParser:
         return [CodeBlockNode(language, code.strip())]
 
     def _parse_quote_block(self: Self) -> QuoteBlockNode:
-        # FIXME: This should be able to handle headers, recursion and code 
+        # FIXME: This should be able to handle headers, recursion and code
         # blocks
 
         self._stop_newline = True
@@ -148,8 +148,6 @@ class MarkdownParser:
         self._stop_newline = False
         self._match("\n")
         return QuoteBlockNode(children)
-
-
 
     def _parse_paragraph(self: Self) -> ParagraphNode:
         children = self._parse_rich_text()
@@ -256,6 +254,13 @@ class MarkdownParser:
             if self._inside_link and self._peek() == "]":
                 break
 
+            if self._match("<!--"):
+                end_current_text()
+                children.append(self._parse_comment())
+                start_index = self._index
+                end_index = self._index
+                continue
+
             if self._peek() == "\n":
                 if self._stop_newline:
                     break
@@ -361,6 +366,20 @@ class MarkdownParser:
             return [TextNode("![")] + alt + [TextNode("](")]
 
         return [ImageNode(url, alt)]
+
+    def _parse_comment(self: Self) -> Node:
+        print("comment")
+        start_index = self._index
+        comment = ""
+        while not self._match("-->"):
+            if self._is_eof():
+                # Rewind
+                self._index = start_index
+                return TextNode("<!--")
+
+            comment += self._consume()
+
+        return CommentNode(comment)
 
     def _isHeaderStart(self: Self) -> bool:
         if self._peek() != "#":

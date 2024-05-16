@@ -180,6 +180,17 @@ class TextNode(Node):
         return (" " * indent * 4) + f'TextNode "{self.text}"\n'
 
 
+@dataclass(slots=True)
+class CommentNode(Node):
+    comment: str
+
+    def accept(self: Self, visitor: "MarkdownVisitor"):
+        visitor.visit_comment(self)
+
+    def dump(self: Self, indent: int = 0) -> str:
+        return (" " * indent * 4) + f'CommentNode "{self.comment}"\n'
+
+
 class MarkdownVisitor(ABC):
     @abstractmethod
     def visit_tree(self: Self, node: MarkdownTree):
@@ -227,4 +238,8 @@ class MarkdownVisitor(ABC):
 
     @abstractmethod
     def visit_text(self: Self, node: TextNode):
+        pass
+
+    @abstractmethod
+    def visit_comment(self: Self, node: CommentNode):
         pass
