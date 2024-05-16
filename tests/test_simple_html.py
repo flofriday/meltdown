@@ -50,6 +50,10 @@ x = y
     expected = '<pre class="golang"><code>a := &quot;flotschi&quot;\nx = y</code></pre>'
     assert expected in produce(src)
 
+def test_quote_block():
+    src ="> **Note:** This isn't quite correct!"
+    expected = "<blockquote> <strong>Note:</strong> This isn&#x27;t quite correct!</blockquote>"
+    assert expected in produce(src)
 
 def test_bold_double_star():
     src = "Hi **there** dude"

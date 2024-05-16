@@ -3,6 +3,7 @@ from typing import Self
 from src.meltdown.Nodes import (
     BoldNode,
     CodeBlockNode,
+    QuoteBlockNode,
     CodeNode,
     EmphNode,
     HeaderNode,
@@ -97,10 +98,14 @@ class MarkdownParser:
                 children += self._parse_code_block(counter)
                 continue
 
-            else:
-                paragraph = self._parse_paragraph()
-                if paragraph.children != []:
-                    children.append(paragraph)
+            if self._match(">"):
+                children.append(self._parse_quote_block())
+                continue
+
+            
+            paragraph = self._parse_paragraph()
+            if paragraph.children != []:
+                children.append(paragraph)
 
         return children
 
@@ -133,6 +138,18 @@ class MarkdownParser:
             return [rest]
 
         return [CodeBlockNode(language, code.strip())]
+
+    def _parse_quote_block(self: Self) -> QuoteBlockNode:
+        # FIXME: This should be able to handle headers, recursion and code 
+        # blocks
+
+        self._stop_newline = True
+        children = self._parse_rich_text()
+        self._stop_newline = False
+        self._match("\n")
+        return QuoteBlockNode(children)
+
+
 
     def _parse_paragraph(self: Self) -> ParagraphNode:
         children = self._parse_rich_text()

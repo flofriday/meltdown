@@ -3,6 +3,7 @@ from typing import Self
 from src.meltdown.Nodes import (
     BoldNode,
     CodeBlockNode,
+    QuoteBlockNode,
     CodeNode,
     EmphNode,
     HeaderNode,
@@ -48,6 +49,13 @@ class HtmlProducer(MarkdownVisitor):
         self.output += "><code>"
         self.output += html.escape(node.code)
         self.output += "</code></pre>\n"
+
+    def visit_quote_block(self: Self, node: QuoteBlockNode):
+        self.output += "<blockquote>"
+        for child in node.children:
+            child.accept(self)
+        self.output += "</blockquote>"
+
 
     def visit_emph(self: Self, node: EmphNode):
         self.output += "<em>"

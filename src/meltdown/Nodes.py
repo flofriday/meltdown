@@ -73,6 +73,20 @@ class CodeBlockNode(Node):
 
 
 @dataclass(slots=True)
+class QuoteBlockNode(Node):
+    children: list[Node]
+
+    def accept(self: Self, visitor: "MarkdownVisitor"):
+        visitor.visit_quote_block(self)
+
+    def dump(self: Self, indent: int = 0) -> str:
+        out = (" " * indent * 4) + "QuoteBlockNode\n"
+        for child in self.children:
+            out += child.dump(indent + 1)
+        return out
+
+
+@dataclass(slots=True)
 class EmphNode(Node):
     children: list[Node]
 
@@ -181,6 +195,10 @@ class MarkdownVisitor(ABC):
 
     @abstractmethod
     def visit_code_block(self: Self, node: CodeBlockNode):
+        pass
+
+    @abstractmethod
+    def visit_quote_block(self: Self, node: QuoteBlockNode):
         pass
 
     @abstractmethod
