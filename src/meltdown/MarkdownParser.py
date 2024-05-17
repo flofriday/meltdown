@@ -368,7 +368,6 @@ class MarkdownParser:
         return [ImageNode(url, alt)]
 
     def _parse_comment(self: Self) -> Node:
-        print("comment")
         start_index = self._index
         comment = ""
         while not self._match("-->"):
