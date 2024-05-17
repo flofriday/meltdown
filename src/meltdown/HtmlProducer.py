@@ -1,6 +1,6 @@
 import html
 from typing import Self
-from src.meltdown.Nodes import (
+from .Nodes import (
     BoldNode,
     CodeBlockNode,
     CommentNode,
@@ -20,77 +20,77 @@ from src.meltdown.Nodes import (
 
 class HtmlProducer(MarkdownVisitor):
     def __init__(self) -> None:
-        self.output: str = ""
+        self._output: str = ""
 
     def produce(self: Self, ast: MarkdownTree) -> str:
-        self.output = ""
+        self._output = ""
         self.visit_tree(ast)
-        return self.output
+        return self._output
 
     def visit_tree(self: Self, node: MarkdownTree):
         for child in node.children:
             child.accept(self)
 
     def visit_paragraph(self: Self, node: ParagraphNode):
-        self.output += "<p>"
+        self._output += "<p>"
         for child in node.children:
             child.accept(self)
-        self.output += "</p>\n"
+        self._output += "</p>\n"
 
     def visit_header(self: Self, node: HeaderNode):
-        self.output += f"<h{node.header_size}>"
+        self._output += f"<h{node.header_size}>"
         for child in node.children:
             child.accept(self)
-        self.output += f"</h{node.header_size}>\n"
+        self._output += f"</h{node.header_size}>\n"
 
     def visit_code_block(self: Self, node: CodeBlockNode):
-        self.output += "<pre"
+        self._output += "<pre"
         if node.language is not None:
-            self.output += f' class="{node.language}"'
-        self.output += "><code>"
-        self.output += html.escape(node.code)
-        self.output += "</code></pre>\n"
+            self._output += f' class="{node.language}"'
+        self._output += "><code>"
+        self._output += html.escape(node.code)
+        self._output += "</code></pre>\n"
 
     def visit_quote_block(self: Self, node: QuoteBlockNode):
-        self.output += "<blockquote>"
+        self._output += "<blockquote>"
         for child in node.children:
             child.accept(self)
-        self.output += "</blockquote>"
+        self._output += "</blockquote>"
 
     def visit_emph(self: Self, node: EmphNode):
-        self.output += "<em>"
+        self._output += "<em>"
         for child in node.children:
             child.accept(self)
-        self.output += "</em>"
+        self._output += "</em>"
 
     def visit_strikethrough(self: Self, node: StrikeThroughNode):
-        self.output += "<del>"
+        self._output += "<del>"
         for child in node.children:
             child.accept(self)
-        self.output += "</del>"
+        self._output += "</del>"
 
     def visit_bold(self: Self, node: BoldNode):
-        self.output += "<strong>"
+        self._output += "<strong>"
         for child in node.children:
             child.accept(self)
-        self.output += "</strong>"
+        self._output += "</strong>"
 
     def visit_code(self: Self, node: CodeNode):
-        self.output += f"<code>{html.escape(node.code)}</code>"
+        self._output += f"<code>{html.escape(node.code)}</code>"
 
     def visit_link(self: Self, node: LinkNode):
         # FIXME: escape url
-        self.output += f'<a href="{node.url}">'
+        self._output += f'<a href="{node.url}">'
         for child in node.children:
             child.accept(self)
-        self.output += "</a>"
+        self._output += "</a>"
 
     def visit_image(self: Self, node: ImageNode):
         # FIXME: escape url
-        self.output += f'<img src="{node.url}" alt="{html.escape(node.description)}"/>'
+        self._output += f'<img src="{node.url}" alt="{html.escape(node.description)}"/>'
 
     def visit_text(self: Self, node: TextNode):
-        self.output += html.escape(node.text.replace("\n", " "))
+        self._output += html.escape(node.text.replace("\n", " "))
 
     def visit_comment(self: Self, node: CommentNode):
-        self.output += "<!--" + node.comment + "-->"
+        self._output += "<!--" + node.comment + "-->"

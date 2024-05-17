@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 from typing import Self
-from src.meltdown.Nodes import (
+from .Nodes import (
     BoldNode,
     CodeBlockNode,
     CommentNode,
