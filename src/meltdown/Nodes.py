@@ -87,6 +87,34 @@ class QuoteBlockNode(Node):
 
 
 @dataclass(slots=True)
+class ListItemNode(Node):
+    children: list[Node]
+
+    def accept(self: Self, visitor: "MarkdownVisitor"):
+        visitor.visit_list_item(self)
+
+    def dump(self: Self, indent: int = 0) -> str:
+        out = (" " * indent * 4) + "ListItemNode\n"
+        for child in self.children:
+            out += child.dump(indent + 1)
+        return out
+
+
+@dataclass(slots=True)
+class UnorderedListNode(Node):
+    items: list[ListItemNode]
+
+    def accept(self: Self, visitor: "MarkdownVisitor"):
+        visitor.visit_unordered_list(self)
+
+    def dump(self: Self, indent: int = 0) -> str:
+        out = (" " * indent * 4) + "UnorderedList\n"
+        for item in self.items:
+            out += item.dump(indent + 1)
+        return out
+
+
+@dataclass(slots=True)
 class EmphNode(Node):
     children: list[Node]
 
@@ -210,6 +238,14 @@ class MarkdownVisitor(ABC):
 
     @abstractmethod
     def visit_quote_block(self: Self, node: QuoteBlockNode):
+        pass
+
+    @abstractmethod
+    def visit_unordered_list(self: Self, node: UnorderedListNode):
+        pass
+
+    @abstractmethod
+    def visit_list_item(self: Self, node: ListItemNode):
         pass
 
     @abstractmethod

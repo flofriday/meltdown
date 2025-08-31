@@ -10,12 +10,14 @@ from .Nodes import (
     HeaderNode,
     ImageNode,
     LinkNode,
+    ListItemNode,
     MarkdownTree,
     MarkdownVisitor,
     ParagraphNode,
     QuoteBlockNode,
     StrikeThroughNode,
     TextNode,
+    UnorderedListNode,
 )
 
 
@@ -57,6 +59,18 @@ class HtmlProducer(MarkdownVisitor):
         for child in node.children:
             child.accept(self)
         self._output += "</blockquote>"
+
+    def visit_list_item(self: Self, node: ListItemNode):
+        self._output += "<li>"
+        for child in node.children:
+            child.accept(self)
+        self._output += "</li>\n"
+
+    def visit_unordered_list(self: Self, node: UnorderedListNode):
+        self._output += "<ul>\n"
+        for item in node.items:
+            item.accept(self)
+        self._output += "</ul>\n"
 
     def visit_emph(self: Self, node: EmphNode):
         self._output += "<em>"

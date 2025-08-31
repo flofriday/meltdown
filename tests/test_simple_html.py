@@ -1,3 +1,5 @@
+from textwrap import dedent
+
 from src.meltdown import HtmlProducer, MarkdownParser
 
 
@@ -56,6 +58,24 @@ def test_quote_block():
         "<blockquote> <strong>Note:</strong> This isn&#x27;t "
         "quite correct!</blockquote>"
     )
+    assert expected in produce(src)
+
+
+def test_unordered_list():
+    src = dedent("""
+    * Apple
+    * Orange
+    * Peach
+    """).strip()
+    expected = dedent(
+        """
+        <ul>
+        <li>Apple</li>
+        <li>Orange</li>
+        <li>Peach</li>
+        </ul>
+        """
+    ).strip()
     assert expected in produce(src)
 
 

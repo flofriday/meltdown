@@ -10,12 +10,14 @@ from .Nodes import (
     HeaderNode,
     ImageNode,
     LinkNode,
+    ListItemNode,
     MarkdownTree,
     Node,
     ParagraphNode,
     QuoteBlockNode,
     StrikeThroughNode,
     TextNode,
+    UnorderedListNode,
 )
 
 
@@ -89,7 +91,7 @@ class MarkdownParser:
                     children.append(self._parse_header(counter))
                     continue
                 else:
-                    children.append(self._parse_paragraph(counter))
+                    children.append(self._parse_paragraph())
                     continue
 
             if self._match("```"):
@@ -102,6 +104,12 @@ class MarkdownParser:
 
             if self._match(">"):
                 children.append(self._parse_quote_block())
+                continue
+
+            if self._peek() in ["*", "-"]:
+                symbol = self._peek()
+                children.append(self._parse_unordered_list(symbol))
+                print(children[-1].dump())
                 continue
 
             paragraph = self._parse_paragraph()
@@ -121,11 +129,11 @@ class MarkdownParser:
         start_index = self._index
 
         language = self._consume_till(["\n", "\0"]).strip()
-        if language == "":
-            language = None
-
         if not self._match("\n"):
             return [TextNode(fence + language)]
+
+        if language == "":
+            language = None
 
         code = ""
         while not self._is_eof() and not self._match(fence):
@@ -149,6 +157,16 @@ class MarkdownParser:
         self._stop_newline = False
         self._match("\n")
         return QuoteBlockNode(children)
+
+    def _parse_unordered_list(self: Self, symbol: str) -> UnorderedListNode:
+        items: list[ListItemNode] = []
+        self._stop_newline = True
+        while self._match(symbol + " "):
+            children = self._parse_rich_text()
+            items.append(ListItemNode(children))
+            self._match("\n")
+        self._stop_newline = False
+        return UnorderedListNode(items)
 
     def _parse_paragraph(self: Self) -> ParagraphNode:
         children = self._parse_rich_text()
@@ -365,7 +383,7 @@ class MarkdownParser:
         if not self._match(")"):
             # resetting the parsing position
             self._index -= len(url)
-            return [TextNode("![")] + alt + [TextNode("](")]
+            return [TextNode("![" + alt + "](")]
 
         return [ImageNode(url, alt)]
 

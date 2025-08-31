@@ -37,4 +37,9 @@ python = ".venv"
 exclude = ["venv", ".venv", "**/resources"]
 
 [dependency-groups]
-dev = ["pytest>=8.4.1", "ruff>=0.12.11", "ty>=0.0.1a19"]
+dev = [
+    "pytest>=8.4.1",
+    "ruff>=0.12.11",
+    "twine>=6.1.0",
+    "ty>=0.0.1a19",
+]

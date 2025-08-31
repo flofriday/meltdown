@@ -1,5 +1,5 @@
 # meltdown
-A naive markdown parser in pure python.
+A naive Markdown parser in pure Python.
 
 **WARNING:** The library will never attempt to do any sanitization on the input. 
 If used for user generated content it is highly recommended to use an external
@@ -52,5 +52,7 @@ print(html)
 ## Run all tests
 
 ```bash
-python -m pytest
+uv run pytest
 ```
+
+<!--uv run twine upload --repository testpypi dist/*-->
