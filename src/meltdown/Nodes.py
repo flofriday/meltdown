@@ -1,6 +1,6 @@
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import Optional, Self
+from typing import Self
 
 
 class Node(ABC):
@@ -59,7 +59,7 @@ class HeaderNode(Node):
 
 @dataclass(slots=True)
 class CodeBlockNode(Node):
-    language: Optional[str]
+    language: str | None
     code: str
 
     def accept(self: Self, visitor: "MarkdownVisitor"):

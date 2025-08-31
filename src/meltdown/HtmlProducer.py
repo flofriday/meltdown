@@ -1,11 +1,11 @@
 import html
 from typing import Self
+
 from .Nodes import (
     BoldNode,
     CodeBlockNode,
-    CommentNode,
-    QuoteBlockNode,
     CodeNode,
+    CommentNode,
     EmphNode,
     HeaderNode,
     ImageNode,
@@ -13,6 +13,7 @@ from .Nodes import (
     MarkdownTree,
     MarkdownVisitor,
     ParagraphNode,
+    QuoteBlockNode,
     StrikeThroughNode,
     TextNode,
 )

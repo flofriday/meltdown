@@ -1,7 +1,7 @@
-from src.meltdown import HtmlProducer, MarkdownParser
-from src.meltdown.Nodes import *
 from typing import Self
-import pytest
+
+from src.meltdown import HtmlProducer, MarkdownParser
+from src.meltdown.Nodes import BoldNode
 
 
 def produce(input: str) -> str:

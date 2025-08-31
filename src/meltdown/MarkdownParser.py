@@ -1,20 +1,21 @@
-from dataclasses import dataclass
+import string
 from typing import Self
+
 from .Nodes import (
     BoldNode,
     CodeBlockNode,
-    CommentNode,
-    QuoteBlockNode,
     CodeNode,
+    CommentNode,
     EmphNode,
     HeaderNode,
     ImageNode,
     LinkNode,
     MarkdownTree,
+    Node,
     ParagraphNode,
+    QuoteBlockNode,
     StrikeThroughNode,
     TextNode,
-    Node,
 )
 
 
@@ -52,7 +53,7 @@ class MarkdownParser:
             if line.strip() == "":
                 continue
 
-            parts = line.split(":")
+            parts = line.split(":", 1)
             if len(parts) != 2:
                 # Malformed frontmatter, rewind and parse as paragraph
                 self._index = start_index
@@ -192,11 +193,12 @@ class MarkdownParser:
                     continue
 
             if self._peek() == "_":
+                allowed_adjecent = string.whitespace + string.punctuation
                 if self._peekn(1) == "_":
-                    if self._inside_bold and self._peekn(2) in ["\0", " ", "\t", "\n"]:
+                    if self._inside_bold and self._peekn(2) in allowed_adjecent:
                         break
 
-                    if self._previous() in ["\0", " ", "\t", "\n"]:
+                    if self._previous() in allowed_adjecent:
                         self._consume()
                         self._consume()
                         end_current_text()
@@ -205,10 +207,10 @@ class MarkdownParser:
                         end_index = self._index
                         continue
                 else:
-                    if self._inside_emph and self._peekn(1) in ["\0", " ", "\t", "\n"]:
+                    if self._inside_emph and self._peekn(1) in allowed_adjecent:
                         break
 
-                    if self._previous() in ["\0", " ", "\t", "\n"]:
+                    if self._previous() in allowed_adjecent:
                         self._consume()
                         end_current_text()
                         children += self._parse_emph("_")
@@ -232,7 +234,7 @@ class MarkdownParser:
                     break
                 self._consume()
                 end_current_text()
-                children += self._parse_code()
+                children.append(self._parse_code())
                 start_index = self._index
                 end_index = self._index
                 continue
@@ -312,17 +314,17 @@ class MarkdownParser:
 
         return [TextNode("~~")] + children
 
-    def _parse_code(self: Self) -> list[Node]:
-        self._inside_code = True
-
+    def _parse_code(self: Self) -> Node:
+        start_index = self._index
         stop_symbols = ["`", "\n", "\0"]
         code = self._consume_till(stop_symbols)
 
         if not self._match("`"):
-            return [TextNode("`" + code)]
+            # Malformed input, rewind
+            self._index = start_index
+            return TextNode("`")
 
-        self._inside_bold = False
-        return [CodeNode(code)]
+        return CodeNode(code)
 
     def _parse_link(self: Self) -> list[Node]:
         # Parsing the text to of the link

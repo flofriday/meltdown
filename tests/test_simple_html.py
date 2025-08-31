@@ -1,5 +1,4 @@
 from src.meltdown import HtmlProducer, MarkdownParser
-import pytest
 
 
 def produce(input: str) -> str:
@@ -53,7 +52,10 @@ x = y
 
 def test_quote_block():
     src = "> **Note:** This isn't quite correct!"
-    expected = "<blockquote> <strong>Note:</strong> This isn&#x27;t quite correct!</blockquote>"
+    expected = (
+        "<blockquote> <strong>Note:</strong> This isn&#x27;t "
+        "quite correct!</blockquote>"
+    )
     assert expected in produce(src)
 
 
@@ -77,6 +79,11 @@ def test_emph_underline():
     assert "<p>I <em>really</em> like you</p>" in produce(src)
 
 
+def test_emph_underline_special_touching():
+    src = "There is _Waldo_!"
+    assert "<p>There is <em>Waldo</em>!</p>" in produce(src)
+
+
 def test_strike_through():
     src = "Hi ~~guys~~ people"
     assert "<p>Hi <del>guys</del> people</p>" in produce(src)
@@ -85,6 +92,14 @@ def test_strike_through():
 def test_inline_code():
     src = "Have you seen `T ** a;` in C before?"
     assert "<p>Have you seen <code>T ** a;</code> in C before?</p>" in produce(src)
+
+
+def test_inline_single_char_code():
+    src = "There is `u` and `uL` in Kotlin prefixes."
+    assert (
+        "<p>There is <code>u</code> and <code>uL</code> in Kotlin prefixes.</p>"
+        in produce(src)
+    )
 
 
 def test_comment():
