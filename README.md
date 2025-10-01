@@ -1,7 +1,7 @@
 # meltdown
 A naive Markdown parser in pure Python.
 
-**WARNING:** The library will never attempt to do any sanitization on the input. 
+**WARNING:** The library will never attempt to do any sanitization on the input.
 If used for user generated content it is highly recommended to use an external
 sanitization library.
 
@@ -26,7 +26,7 @@ print(html)
 ```
 
 The default `HtmlProducer` is heavily inspired by [pandoc](https://pandoc.org),
-however, if you are unhappy you can easily write your own producer or if only 
+however, if you are unhappy you can easily write your own producer or if only
 some formattings are unwanted override the default methods.
 
 In the following example we change the bold formatting form `<strong>` to `<b>`:
@@ -49,10 +49,33 @@ html = CustomHtmlProducer().produce(doc)
 print(html)
 ```
 
+## Development
+
+To quickly test some stuff there is a cli that consumes the library which you can run with:
+
+```
+usage: meltdown-dev-cli [-h] [--dump] filename
+
+A cli for developers trying meltdown
+
+positional arguments:
+  filename    Name of the file being parsed and converted.
+
+options:
+  -h, --help  show this help message and exit
+  --dump      Print the dump instead of the html.
+```
+
+```bash
+uv run cli.py tests/blog/post-jit.md
+```
+
 ## Run all tests
 
 ```bash
 uv run pytest
 ```
+
+If you change the parser you can update the dump files by setting the `GOLDEN=TRUE` environment variable.
 
 <!--uv run twine upload --repository testpypi dist/*-->

@@ -1,6 +1,6 @@
 [project]
 name = "meltdown"
-version = "0.0.5"
+version = "0.0.6"
 authors = [{ name = "flofriday", email = "flohacksfriday@gmail.com" }]
 description = "A markdown parser"
 readme = "README.md"
@@ -37,9 +37,4 @@ python = ".venv"
 exclude = ["venv", ".venv", "**/resources"]
 
 [dependency-groups]
-dev = [
-    "pytest>=8.4.1",
-    "ruff>=0.12.11",
-    "twine>=6.1.0",
-    "ty>=0.0.1a19",
-]
+dev = ["pytest>=8.4.1", "ruff>=0.12.11", "twine>=6.1.0", "ty>=0.0.1a19"]
