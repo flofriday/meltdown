@@ -234,3 +234,22 @@ def test_unclosed_comment_in_strikethrough():
     src = "Hi ~~<!--there~~"
     expected = "<p>Hi <del>&lt;!--there</del></p>"
     assert expected in produce(src)
+
+
+def test_start_bold():
+    # There was a bug in the the unordered list parsing in which it got
+    # trigged in such cases AND also ran forever.
+    src = "**Apfelstrudel**"
+    expected = "<strong>Apfelstrudel</strong>"
+    assert expected in produce(src)
+
+
+def test_bold_after_unordered_list():
+    src = dedent("""
+    * one
+    * two
+    **Bold**
+    """).strip()
+    expected = "<ul>\n<li>one</li>\n<li>two</li>\n</ul>\n<p><strong>Bold</strong></p>\n"
+    assert expected in produce(src)
+

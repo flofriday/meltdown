@@ -106,7 +106,7 @@ class MarkdownParser:
                 children.append(self._parse_quote_block())
                 continue
 
-            if self._peek() in ["*", "-"]:
+            if self._peek() in ["*", "-"] and self._peekn(1) in [" ", "\t"]:
                 symbol = self._peek()
                 children.append(self._parse_unordered_list(symbol))
                 print(children[-1].dump())
@@ -161,7 +161,9 @@ class MarkdownParser:
     def _parse_unordered_list(self: Self, symbol: str) -> UnorderedListNode:
         items: list[ListItemNode] = []
         self._stop_newline = True
-        while self._match(symbol + " "):
+        while self._peek() == symbol and self._peekn(1) in [" ", "\t"]:
+            self._consume()
+            self._consume()
             children = self._parse_rich_text()
             items.append(ListItemNode(children))
             self._match("\n")
