@@ -1,0 +1,177 @@
+MarkdownTree metadata:{'title': 'Meltdown: The story of a markdown parser', 'date': '2024-05-21', 'description': 'Building a markdown parser for fun.'}
+    Paragraph
+        CommentNode " Start writing your markdown here ;) "
+    HeaderNode size:2
+        TextNode "Getting nerd-sniped"
+    Paragraph
+        TextNode "A couple of weeks back my friend "
+        LinkNode url: https://lprod.dev/
+            TextNode "Luis"
+        TextNode " \nasked me how my blog works and once I\ntold him that I wrote a custom (very simple) static site generator, he got\nexcited and started to build his own. "
+    QuoteBlockNode
+        TextNode " "
+        BoldNode
+            TextNode "🦜 Chirpy the Parrot:"
+        TextNode " Couldn't you just use an existing solution like "
+        LinkNode url: https://substack.com/
+            TextNode "substack"
+        TextNode " or "
+        LinkNode url: https://bearblog.dev/
+            TextNode "bearblog"
+        TextNode "?"
+    Paragraph
+        TextNode "Of course, and that's also what I told him, however as developers we love to \nbuild stuff and it's not always about getting the easiest solution but about \nthe fun of building stuff."
+    Paragraph
+        TextNode "Anyway, a couple of days later I got a message which as a compiler engineer\nscared me:"
+    Paragraph
+        ImageNode url: chat1.png, description: 'Chat with friend'
+    Paragraph
+        TextNode "Well, there was only one obvious next step: Building a proper markdown parser \nand recording my-self doing so that he can learn more about parsers 😝."
+    HeaderNode size:2
+        TextNode "Wait ... why not regex?"
+    Paragraph
+        TextNode "If you don't spend all day thinking about grammars, LL(1)-conflicts and the \nadvantages of right-recursion over left-recursion you might be wondering why \nI was so terrified by the attempt to parse markdown with regex."
+    Paragraph
+        TextNode "The simple answer is that regular expression can only express regular languages \nbut most languages like Markdown are context-free. In less fancy terms this \nmeans that regex just isn't strong enough to understand Markdown."
+    Paragraph
+        TextNode "I think about it in the terms that while regex can count it cannot remember previous\ncounters. For example, the following regex can accept one to five opening \nparenthesis and one to five closing ones. "
+    CodeBlock language:regex code:"\({1-5}\){1-5}"
+    Paragraph
+        TextNode "However, it doesn't enforce that all opening ones have a matching closing one and there\nis no way to express that in a regex."
+    Paragraph
+        CommentNode " FIXME: I want code blocks in quotes "
+    QuoteBlockNode
+        TextNode " "
+        BoldNode
+            TextNode "🦜 Chirpy the Parrot:"
+        TextNode " actually you can express it with: "
+        CodeNode code:'\((\((\((\((\(()?\))?\))?\))?\))?\)'
+    Paragraph
+        TextNode "Yes, Chirpy you are correct, as long as all counts are finite, we can express it \nwith a hideous regular grammar, however we often don't want to limit us to an upper \nlimit. Also, even if Markdown would enforce upper limits, I would argue that it\neasier to write a recursive decent parser than such regex."
+    HeaderNode size:2
+        TextNode "Parsing markdown is "
+        StrikeThroughNode
+            TextNode "hard"
+        TextNode " "
+        EmphNode
+            TextNode "different"
+    Paragraph
+        TextNode "Before getting lost in the weeds of consuming tokens and unexpected EOFs, we \nfirst need to address the most important question: what to name our baby. And \nthis is especially hard when the competition is so strong with great hits like \n"
+        LinkNode url: https://github.com/vmg/sundown
+            TextNode "sundown"
+        TextNode ", \n"
+        LinkNode url: https://github.com/markedjs/marked
+            TextNode "marked"
+        TextNode ",\n"
+        LinkNode url: https://github.com/erusev/parsedown
+            TextNode "parsedown"
+        TextNode " and \n"
+        LinkNode url: https://github.com/vmg/redcarpet
+            TextNode "redcarpet"
+        TextNode ". However, I quickly discovered \nthat "
+        BoldNode
+            TextNode "meltdown"
+        TextNode " doesn't have a prominent entry, which is just a wrong that \nneeds to be corrected. As a bonus the package name was also free on \n"
+        LinkNode url: https://pypi.org/
+            TextNode "PyPI"
+        TextNode " and to be honest I just like the confidence it emits. "
+    Paragraph
+        TextNode "With a great name at hand, I fired up VSCode and OBS and started writing a \nsimple recursive decent \nparser. While there is no official Markdown spec the most common is \n"
+        LinkNode url: https://commonmark.org/
+            TextNode "CommonMark"
+        TextNode ", since I am more comfortable with GitHub \nflavored markdown, I implemented something along those lines. The goal is\nto learn more about parsers anyway."
+    Paragraph
+        TextNode "Pretty soon I discovered a pretty big difference between parsing Markdown and\nother programming languages, with which I had more experience: "
+        BoldNode
+            TextNode "there are no \nerrors in Markdown"
+        TextNode "."
+    Paragraph
+        TextNode "This means if you come across a "
+        EmphNode
+            TextNode "malformed"
+        TextNode " rule you just decide to interpret it \nas something else. For example, if the bold start "
+        CodeNode code:'**'
+        TextNode " is never closed than we\njust interpret it as text and not as formatting."
+    Paragraph
+        TextNode "Unfortunately, this leads to quite some ugly code where we cannot insert a \nnode into our tree until we also found a matching closing tag, and \notherwise need to insert the opening tag as text."
+    CodeBlock language:python code:"def _parse_strikethrough(self: Self) -> list[Node]:
+    self._inside_strikethrough = True
+    children = self._parse_rich_text()
+    self._inside_strikethrough = False
+
+    if not self._match("~~"):
+        # No closing tag found, insert start as text
+        return [TextNode("~~")] + children
+
+    return [StrikeThroughNode(children)]"
+    Paragraph
+        TextNode "This isn't too bad. However, sometimes we don't want to parse something as rich \ntext but as unformatted raw input. For example, take inline code, once a backtick\nappears we parse everything until the next backtick as code and not as richtext.\nIf however, no closing backtick appears we need to insert the initial backtick \nas text and go back (rewind) and parse the following content again, but now as rich text."
+    CodeBlock language:python code:"def _parse_code(self: Self) -> Node:
+        start_index = self._index
+        stop_symbols = ["`", "\n", "\0"]
+        code = self._consume_till(stop_symbols)
+
+        if not self._match("`"):
+            # Malformed input, rewind
+            self._index = start_index
+            return TextNode("`")
+
+        return CodeNode(code)"
+    Paragraph
+        TextNode "Other than this, meltdown was quite easy to implement. During the implementation I \noften tried some edge-cases in other parsers like \n"
+        LinkNode url: https://try.pandoc.org
+            TextNode "try.pandoc.org"
+        TextNode " which really helped. Meltdown still \nisn't the cleanest implementation but it has quite a few tests and a somewhat \nsimple API to use:"
+    CodeBlock language:python code:"from meltdown import MarkdownParser, HtmlProducer
+
+doc = MarkdownParser().parse("# Hello **friends**!")
+html = HtmlProducer().produce(doc)
+print(html)"
+    HeaderNode size:2
+        TextNode "Introducing meltdowns cousin: markberg"
+    Paragraph
+        TextNode "I recorded myself during the first two hours of meltdowns development and \nexplained as I went along. At that point the \nparser could parse bold, italics and headers and could convert it to html. "
+    QuoteBlockNode
+        TextNode " "
+        BoldNode
+            TextNode "🦜 Chirpy the Parrot:"
+        TextNode " Where is the Youtube link?"
+    Paragraph
+        TextNode "Well, I am not that great on camera yet, there are minutes of dead time where I \ndebug stuff, sometimes some German slips out and at some points I was \nfrustrated and used profanities. Nothing too bad but also nothing I want to be \non the internet forever."
+    Paragraph
+        TextNode "However, if you are interested to learn more about parsers, interpreters and \ncompilers, I cannot recommend "
+        LinkNode url: https://craftinginterpreters.com/
+            TextNode "Crafting Interpreters"
+        TextNode "\nenough. "
+    Paragraph
+        TextNode "Anyway, those two videos were enough for Luis to get started on his own markdown \nparser, which he lovingly called "
+        BoldNode
+            TextNode "markberg"
+        TextNode ". Since he started out with the same base, both parsers have quite a few things in common. However, Markberg surpassed Meltdown's development quite quickly."
+    Paragraph
+        TextNode "Currently all of "
+        LinkNode url: https://lprod.dev/
+            TextNode "Luis's blog posts"
+        TextNode " (well at the time of writing there is only \none but I am sure more will come) are rendered with markberg. But what's more\nimportant is that I could demystify parsers for a friend."
+    HeaderNode size:2
+        TextNode "Porting my blog to meltdown"
+    Paragraph
+        TextNode "As I mentioned in the beginning my blog uses a super small (single file) \ncustom static site generator. The script previously shelled out to "
+        LinkNode url: https://pandoc.org/
+            TextNode "pandoc"
+        TextNode " which\nconverted the markdown to html. "
+    Paragraph
+        TextNode "Now with a self-written markdown parser this didn't seem like the right solution\nanymore. So I expanded the markdown parser to be able to handle all my blog posts without \nneeding to modify them, published meltdown on PyPI and converted my static site \ngenerator."
+    Paragraph
+        TextNode "Which means that the article you are reading right now was parsed and converted \nto HTML by meltdown. \nI don't know if it will stay this way forever, it very well might be that \nsomeday I'll want to use a complex Markdown feature without messing around with \nmy parser first, and I'll switch it out again. But for now, this seems like a \nfun side project."
+    Paragraph
+        TextNode "You can find meltdown on "
+        LinkNode url: https://github.com/flofriday/meltdown
+            TextNode "GitHub"
+        TextNode " and \n"
+        LinkNode url: https://pypi.org/project/meltdown/
+            TextNode "PyPI"
+        TextNode ". It still doesn't handle all \ncases, but if you want an "
+        EmphNode
+            TextNode ""understandable in an afternoon"️"
+        TextNode " small parser with a \nlot of low hanging fruit for contribution it might be the right choice for you."

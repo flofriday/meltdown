@@ -1,0 +1,387 @@
+MarkdownTree metadata:{'title': '50uL Shades of Kotlin: Why your numbers long for color', 'date': '2025-09-04', 'image': 'some_image_for_social_preview.png', 'description': 'This is just a new post.', 'draft': 'true'}
+    Paragraph
+        TextNode "Recently I was investigating some bug in my branch of the Kotlin compiler and suddenly I had a hunch that my code probably was confused by some inlining. So to quickly verify that idea, my muscle memory rushed me to the already open tab of "
+        LinkNode url: https://godbolt.org/
+            EmphNode
+                TextNode "Compiler Explorer"
+        TextNode "."
+    Paragraph
+        TextNode "That's weird, the code is correct, the compiler ran, I see the bytecode that confirms that inlining takes place which will be a cause for many future headaches but I already don't care about that anymore. Why doesn't Godbolt correctly highlight "
+        CodeNode code:'3uL'
+        TextNode "?"
+    Paragraph
+        TextNode "Well at least there is still the trusty "
+        LinkNode url: https://play.kotlinlang.org/
+            TextNode "Kotlin Playground"
+        TextNode ", let's paste it in there and voilà – "
+        EmphNode
+            TextNode "WHAT?"
+        TextNode " Even that doesn't highlight the suffix?"
+    Paragraph
+        TextNode "Ok back to "
+        LinkNode url: https://www.jetbrains.com/idea/
+            TextNode "IntelliJ IDEA"
+        TextNode ", I "
+        BoldNode
+            TextNode "need"
+        TextNode " to see at least one colored number literal, and luckily the most common IDE for Kotlin does do it right."
+    HeaderNode size:2
+        TextNode "What's going on here?"
+    Paragraph
+        TextNode "It's safe to assume that Compiler Explorer with such a wide array of supported languages and a huge pile of other difficult problems to solve (like "
+        LinkNode url: https://xania.org/202506/how-compiler-explorer-works
+            TextNode "92 million yearly compilations"
+        TextNode ") doesn't maintain it's own language parsing and code editing framework. So let's grab our trenchcoat and magnifier glass and cosplay as the world's most famous detective."
+    Paragraph
+        EmphNode
+            TextNode "Right click -> Inspect -> Scroll -> Click -> Scroll"
+        TextNode " ... and there we have the culprit, "
+        LinkNode url: https://microsoft.github.io/monaco-editor/
+            EmphNode
+                TextNode "Manaco - The Editor of the Web"
+        TextNode ".\nA quick google search later and on the Monaco Playground we can verify that indeed the bug seems to originate from here."
+    Paragraph
+        TextNode "Glancing over the "
+        LinkNode url: https://github.com/microsoft/monaco-editor?tab=readme-ov-file#faq
+            TextNode "ReadMe"
+        TextNode " we find the following interesting section:"
+    QuoteBlockNode
+        TextNode " The Monaco Editor is generated straight from VS Code's sources with some "
+        TextNode "["
+        TextNode "..."
+        TextNode "]"
+    Paragraph
+        EmphNode
+            TextNode "Wait"
+        TextNode " does that mean, that the bug actually originates from VS Code?"
+    Paragraph
+        TextNode "Well ... no. While the Monaco Core does call the VSCode repo it's home, it doesn't contain the highlighting code, so the bug is isolated to Monaco. This also means that while Monaco is able to highlight Kotlin, vanilla VSCode without plugins isn't."
+    Paragraph
+        TextNode "Going though a similar investigation sprint for Kotlin Playground we find that\nhere too, they depend on an open source solution, but in this case it's "
+        LinkNode url: https://codemirror.net/
+            EmphNode
+                TextNode "CodeMirror"
+        TextNode "."
+    HeaderNode size:2
+        TextNode "A quick deep dive into Kotlin's number literals"
+    QuoteBlockNode
+        TextNode " "
+        BoldNode
+            TextNode "🦜 Chirpy the Parrot:"
+        TextNode " So what's so hard about Kotlin literals?"
+    Paragraph
+        TextNode "Well, nothing here is inherently "
+        EmphNode
+            TextNode "hard"
+        TextNode ", many other languages, like Java, have a similar level of complexity, but to my knowledge it does have some "
+        EmphNode
+            TextNode "oddeties"
+        TextNode " I haven't seen in many languages."
+    Paragraph
+        TextNode "But let's start at the beginning, there are 4 ways to write a number literal:"
+    CodeBlock language:kotlin code:"val float = 1.23
+val dec = 123
+val hex = 0xff80
+val bin = 0b101010"
+    Paragraph
+        TextNode "As you can see like C and Java it has floating point and binary and hex notations, with the later two requiring a prefix (the casing doesn't matter and so "
+        CodeNode code:'0Xff80'
+        TextNode " would also be fine here.)"
+    Paragraph
+        TextNode "For floats the only allowed suffix is "
+        CodeNode code:'f'
+        TextNode ". By default all numbers are doubles and if you need to force a reduced width you can add this, but often you don't have to care about this since type-inference can figure it out for you."
+    CodeBlock language:kotlin code:"val strudel = 1.23      // this is actually a double
+val kuchen  = 1.23f     // this is a float
+val melange = 123f      // Also a float"
+    Paragraph
+        TextNode "Since float literals are doubles by default there is no need for, and no way to, express double literals with a suffix."
+    Paragraph
+        TextNode "For decimal, hexadecimal and binary literals you can also add the suffix "
+        CodeNode code:'u'
+        TextNode " or "
+        CodeNode code:'U'
+        TextNode " to make them unsigned (a somewhat newer feature introduced in Kotlin 1.5, May 2021) and "
+        CodeNode code:'L'
+        TextNode " to make them long. Note here that the lower case "
+        CodeNode code:'l'
+        TextNode " isn't allowed."
+    CodeBlock language:kotlin code:"val a = 123u        // Unsinged Int
+val b = 123U        // Unsigned Int
+val c = 123L        // Long
+val d = 123uL       // Unsigned Long
+val e = 123UL       // Unsigned Long
+
+val fixned = 123l   // Error: Use 'L' instead of 'l'."
+    QuoteBlockNode
+        TextNode " "
+        BoldNode
+            TextNode "🦜 Chirpy the Parrot:"
+        TextNode " This code doesn't look quite right. Why is it so ... "
+        EmphNode
+            TextNode "colorless"
+        TextNode "?"
+    Paragraph
+        TextNode "Well well well, guess who relied on an open-source solution for his blog's code highlighting?"
+    Paragraph
+        TextNode "Since Kotlin 1.1 you can also use underscores inside nunbers to seperate them (but they must appear in the middle):"
+    CodeBlock language:kotlin code:"val million = 1_000_000
+val red = 0xFF_00_00
+val twoBytes = 0b01100101_11010101
+val longSpace = 1__3"
+    Paragraph
+        TextNode "It's also important to mention that leading zero's aren't allowed for decimal\nliterals."
+    CodeBlock language:kotlin code:"// These are ok
+val zero = 0
+val floatingZero = 0.0
+val floatSuffix = 0000f
+val longZero = 0L
+val binary = 0b000
+val hex = 0x000
+
+// These aren't
+val twoZeros = 00
+val may = 05"
+    Paragraph
+        TextNode "We're almost done, but floating points can also directly start with a dot or can contain the "
+        EmphNode
+            TextNode "E Noation"
+        TextNode "."
+    CodeBlock language:kotlin code:"val x = .123
+val 1.2e+3"
+    Paragraph
+        TextNode "I know this whole paragraph wasn't quite the formal notation you might be used to, so if you're the kind reasonable workaholic who reads EBNF grammar in their free time you can also dive in to the "
+        LinkNode url: https://kotlinlang.org/spec/pdf/kotlin-spec.pdf
+            TextNode "Kotlin Specification"
+        TextNode " (section 1.2.3 Literals) that has that."
+    Paragraph
+        TextNode "Or if for some sick reason you prefer a massive regex:"
+    CodeBlock language:text code:"0[xX][0-9a-fA-F]([_0-9a-fA-F]*[0-9a-fA-F])?[uU]?L?|
+0[bB][01]([_01]*[01])?[uU]?L?|
+\.[0-9]([_0-9]*[0-9])?([eE][+-]?[0-9]([_0-9]*[0-9])?)?[fF]?|
+(([0-9]([_0-9]*[0-9])?)(\.[0-9]([_0-9]*[0-9])?)?)(([eE][+-]?[0-9]([_0-9]*[0-9])?)[fF]?|[fF])|
+(0|[1-9]([_0-9]*[0-9])?)([uU]?L?)"
+    Paragraph
+        ImageNode url: regex.png, description: 'Regex Graph'
+    Paragraph
+        EmphNode
+            TextNode "Yikes!"
+    Paragraph
+        TextNode "You can say a lot good things about Regex but it won't win any prices for readability. Luckily, I wrote that one for "
+        EmphNode
+            TextNode "Other Reasons™"
+        TextNode " (aka. foreshadowing) so stick with the grammar if you need to be sure."
+    HeaderNode size:2
+        TextNode "Bad highlighting all the way down"
+    Paragraph
+        TextNode "Ok so we investigated two out of two open source solutions and they get Kotlin's\nnumber literals wrong. That seems pretty unlikely. "
+        EmphNode
+            TextNode "What are the odds of that?"
+    Paragraph
+        TextNode "So far I stumbled across the higlighting problem by accident, but to see if it's a broader problem it would be much easier to to have an test file we can past into each. Obviously, I could also always dig into the codebase and compare that to the mental model I have in my head, but having an exhaustive test-set to copy and paste isn't just less error-prone but also much quicker to validate. So I took the original grammar from the spec and instead of using it to create a parser I wrote a "
+        LinkNode url: https://gist.github.com/flofriday/1ff27a1324a3fa92c5a614e46b43dd37
+            TextNode "generator for valid literals"
+        TextNode "."
+    Paragraph
+        TextNode "After manifesting some utility functions into existance, the generator code ended up looking remarkibly similar to the EBNF grammar it implemented, making it easy to verify for correctness. As a side note I'm a big fan of copying the spec into sourcecode."
+    CodeBlock language:kotlin code:"/**
+ * Grammar:
+ * [DecDigits] '.' DecDigits [DoubleExponent]
+ * | DecDigits DoubleExponent
+ */
+fun doubleLiteral(): List<String> =
+    either(
+        optional(decDigits())
+            .add(".")
+            .add(decDigits())
+            .optional(doubleExponent()),
+        decDigits()
+            .add(doubleExponent())
+    )"
+    Paragraph
+        TextNode "With my cute 3k lines of testcases (I might have overdone it just a little) it was quite easy to quickly get a rough overview "
+        EmphNode
+            TextNode "if"
+        TextNode " and "
+        EmphNode
+            TextNode "where"
+        TextNode " the issues in a highlighter might be."
+    Paragraph
+        TextNode "As a next reasonable step I went on a fever dream like rampage pasting that snippet into any code editor and highlighter library demo page I could think of."
+    Paragraph
+        TextNode "Actually, this reminds me of another point, if you ever find yourself mainting a highlighter 1) good luck with rejecting a never-ending stream of unsoliceted PRs for languages with a single digit userbase, even when represented in binary format and 2) please let me try your library in the browser. With the current state of WASM and basically free hosting with GitHub pages there is almost no excuses not to. I know that it might be impractically slow and the bundle might be too large for production-use but when I'm "
+        EmphNode
+            TextNode "shopping"
+        TextNode " for a highlighter my first priority is it's quality and an interactive demo lets me figure that out so much faster."
+    Paragraph
+        TextNode "After the initial high of pasting that code into everything I walked away with two realizations. First, while there are a lot of editors, libraries etc that do highlighting, there aren't"
+    Paragraph
+        TextNode "From there it was mostly a task of grepping through the codebase for any mention of Kotlin finding the code responsible and adjusting it as needed."
+    Paragraph
+        CommentNode " So from the rules above I patched together a simple file with a handful of test cases and pasted it into any highlighting library I could get my hands on. Which in the end allowed me to produce this little gallery of bad highlights.
+ "
+        TextNode "\n"
+        CommentNode " _TODO_
+
+- CodeMirror
+- Monaco
+- highlight.js
+- prism.js
+- rainbow.js
+- pygments
+- rouge (is good)
+- treesiter
+- shiki
+- sublime text
+- bat "
+    HeaderNode size:2
+        TextNode "All numbers have the literal right to be highlighted"
+    QuoteBlockNode
+        TextNode " "
+        BoldNode
+            TextNode "🦜 Chirpy the Parrot:"
+        TextNode " Buhu, all the free open source software that you use on a daily basis has a minor bug. So what ya gonnna do about it?"
+    Paragraph
+        TextNode "I guess it's time to get our hands dirty and contribute back."
+    Paragraph
+        CommentNode "
+As a good open-source loving person that used most many of the libraries mentioned above (directly or indirectly) there is really only thing to do: **Fixing the problem**.
+"
+        TextNode "\n"
+        CommentNode "
+Till now I used to play around to with each highlighter until I find a problem, but if we are going to fix them it would be really useful to have a test-set. Obviously, I could also always dig into the codebase and compare that to the mental model I have in my head, but having an exhaustive test-set to copy and paste isn't just less error-prone but also much quicker to validate. So I took the original grammar from the spec and instead of using it to create a parser I wrote a [generator for valid literals](https://gist.github.com/flofriday/1ff27a1324a3fa92c5a614e46b43dd37).
+
+With a few utility functions that map closely to EBNF grammar the Kotlin code looked remarkably similar to the the grammar, making it easy to verify the correctness.
+
+```kotlin
+/**
+ * Grammar:
+ * [DecDigits] '.' DecDigits [DoubleExponent]
+ * | DecDigits DoubleExponent
+ */
+fun doubleLiteral(): List<String> =
+    either(
+        optional(decDigits())
+            .add(".")
+            .add(decDigits())
+            .optional(doubleExponent()),
+        decDigits().add(doubleExponent())
+    )
+```
+
+With my cute 3k lines of testcases (I might have overdone it just a little) it was quite easy to quickly get a rough overview _if_ and _where_ the issues in a highlighter might be. From there it was mostly a task of grepping through the codebase for any mention of Kotlin finding the code responsible and adjusting it as needed "
+    Paragraph
+        TextNode "While I already had a complete regex for a correct parsing and most libraries do use regex for lexing (which is a totally valid for lexing) I didn't just paste it in there. Some project had only a quite simplistic approach and there it made sense to replace the little they had with a more sophisticated one, but others did only lack some corner cases so there I tried the least invasive approach and only made changesonly changes where it was necessary."
+    Paragraph
+        TextNode "The regular grammar I showed mentioned last chapter is correct but, there are some valid reasons why you want to accept false-positives on purpose. This especially applies to editors where you might want to allow incomplete literals so that when the user types it is already highlighted as it might "
+        EmphNode
+            TextNode "feel"
+        TextNode " laggy when the editor only caughs up once you are done typing."
+    CodeBlock language:kotlin code:"// Correct literals
+val full = 1_2
+val octal = 0xf
+
+// Incomplete literals,
+// but we might already highlight it while they are typing
+val partial = 1_
+val partialOct = 0x"
+    Paragraph
+        TextNode "For such behaivor I decided on a case by case basis what the current status qou was in for each project."
+    Paragraph
+        TextNode "So finally we end up with a short list of completed PRs – that I promise to keep updating but eventually will propperly forget – and a longer backlog for eventual "
+        EmphNode
+            TextNode "nerd-sniping"
+        TextNode ":"
+    UnorderedList
+        ListItemNode
+            LinkNode url: https://github.com/microsoft/monaco-editor/pull/4973
+                TextNode "Monaco"
+        ListItemNode
+            LinkNode url: https://github.com/codemirror/legacy-modes/pull/23
+                TextNode "CodeMirror"
+        ListItemNode
+            LinkNode url: https://github.com/highlightjs/highlight.js/pull/4307
+                TextNode "highlight.js"
+        ListItemNode
+            LinkNode url: https://github.com/pygments/pygments/pull/2961
+                TextNode "Pygments"
+        ListItemNode
+            EmphNode
+                TextNode "prism.js"
+        ListItemNode
+            EmphNode
+                TextNode "treesiter"
+        ListItemNode
+            EmphNode
+                TextNode "shiki"
+        ListItemNode
+            EmphNode
+                TextNode "sublime text"
+        ListItemNode
+            EmphNode
+                TextNode "bat"
+    QuoteBlockNode
+        TextNode " "
+        BoldNode
+            TextNode "🦜 Chirpy the Parrot:"
+        TextNode " So what did they get wrong about Kotlin's number parsing?"
+    Paragraph
+        TextNode "Well, since Kotlin (especially in the beginning) was so closely related to Java, many projects either reused that parser directly or were heavily insipired by it. Quite often this lead to them accepting invalid code like the "
+        CodeNode code:'d'
+        TextNode " and "
+        CodeNode code:'D'
+        TextNode " suffixes."
+    Paragraph
+        TextNode "Some syntax was only later introduced, like the "
+        CodeNode code:'u'
+        TextNode " and "
+        CodeNode code:'U'
+        TextNode " suffixes for unsinged numbers in Kotlin 1.5 and with some of the highlighters supporting about 200 languages changes like that can simply slip under the radar."
+    Paragraph
+        TextNode "And sometimes your educated guesses can be wrong. All prefixes and suffixes are case independent except for the long suffix "
+        CodeNode code:'L'
+        TextNode " where only the uppercase is valid."
+    Paragraph
+        TextNode "Also parsing is hard, having implemented a couple of fixes, the same regex might work for one highlighter but fail in another as they use a different regex-engine that either has less features or is to greedy and doesn't backtrack far enough."
+    QuoteBlockNode
+        TextNode " "
+        BoldNode
+            TextNode "🦜 Chirpy the Parrot:"
+        TextNode " What we really needed is a new standard language grammars to rule them all, so that every language has only one implementation, one source of truth."
+    Paragraph
+        TextNode "Yes in theory that would been awesome, but there are good reason for wanting a custom implementation. For example editors need to deal with broken inputs (while the developer is typing) while some other highlighters of static content might decide against it so that the user doesn't even need to copy the code from Stackoverflow into their IDE as it is visibly broken."
+    Paragraph
+        TextNode "However, there are a "
+        EmphNode
+            TextNode "some"
+        TextNode " quasi standards, many highlighters reuse TextMate grammars or TreeSitter grammars. One library for Go, "
+        LinkNode url: https://github.com/alecthomas/chroma
+            TextNode "chroma"
+        TextNode " parses the Python soucecode of "
+        LinkNode url: https://pygments.org/
+            TextNode "Pygments"
+        TextNode " to generate it's own (admitedly similar) grammar files."
+    Paragraph
+        TextNode "A notable mention in all of this, however is "
+        LinkNode url: https://rouge.jneen.net/
+            TextNode "Rouge"
+        TextNode " a highlighting that did handle everything I threw at it and has an implementation that is remarkably close to the official Kotlin grammar."
+    HeaderNode size:2
+        TextNode "Remarks"
+    Paragraph
+        TextNode "While this post mostly highlights issues (pun intended) in open source libraries it's not my intention to blame anyone here. Many of them do support a huge amount of languages and keeping up with syntax changes is impossible for what if often just a side project of a single person."
+    Paragraph
+        TextNode "Instead, I want to thank you, for making it so much easier communicate about code (especially for those of us with dyslexia)."
+    Paragraph
+        TextNode "I want to take this space of unused internet realestate to thank my friends for the alternative titles they suggested. They made me laugh pretty hard so you might enjoy them too:"
+    UnorderedList
+        ListItemNode
+            TextNode "50 Shades of Kotlin: Your Code is missing color"
+        ListItemNode
+            TextNode "From 0L to Hero: Fixing Kotlin number highlighters"
+        ListItemNode
+            TextNode "All Number literals have a right to be highlighted"
+        ListItemNode
+            TextNode "Number literal(ly) broken: What syntax highlighters get wrong"
+        ListItemNode
+            TextNode "Fixing Kotlin number highlighters with this one simple trick; Developers are shocked!"

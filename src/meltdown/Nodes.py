@@ -205,7 +205,9 @@ class TextNode(Node):
         visitor.visit_text(self)
 
     def dump(self: Self, indent: int = 0) -> str:
-        return (" " * indent * 4) + f'TextNode "{self.text}"\n'
+        return (
+            " " * indent * 4
+        ) + f'TextNode "{self.text.replace("\n", r"\n").replace("\t", r"\t")}"\n'
 
 
 @dataclass(slots=True)

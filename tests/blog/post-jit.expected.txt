@@ -1,0 +1,57 @@
+MarkdownTree metadata:{'title': 'What is a JIT compiler anyway?', 'date': '2022-07-06', 'description': 'My bachelor thesis is in the field of just-in-time(JIT) compiler research and while this already sounds...', 'image': 'Drawing_JIT.excalidraw.png'}
+    Paragraph
+        TextNode "My bachelor thesis is in the field of just-in-time(JIT) compiler research and while\nthis already sounds very advanced (which I absolutely love) this is my attempt at\nexplaining it to a non technical audience."
+    HeaderNode size:2
+        TextNode "The "
+        EmphNode
+            TextNode ""normal""
+        TextNode " compiler"
+    Paragraph
+        ImageNode url: Drawing_AOT.excalidraw.png, description: 'Drawing AOT'
+    Paragraph
+        TextNode "As you probably know from movies, computers can only understand binary (ones and zeros).\nContrary to programmers and hackers in movies, we don't program in binary and just\nlike you cannot read binary\n(well, "
+        LinkNode url: https://www.youtube.com/watch?v=wCQSIub_g7M
+            TextNode "some can read basic binary"
+        TextNode ",\nbut it's still a lot slower and I definitely can't)."
+    Paragraph
+        TextNode "So the solution is to write something in an programming language which is more\nlike english text. Then we use a program to translate it to the binary machine code.\nThe translation program is what we call a compiler."
+    Paragraph
+        TextNode "The classical compiler is a so called ahead-of-time (AoT) compiler, which means the\ndeveloper who writes the app also runs the compiler for your machine and then\nsends you the compiled binary, which your computer just takes and runs."
+    HeaderNode size:2
+        TextNode "The Interpreter"
+    Paragraph
+        ImageNode url: Drawing_Interpreter.excalidraw.png, description: 'Drawing Interpreter'
+    Paragraph
+        TextNode "Computers can be grouped into different Architectures where each architecture\nhas a different set of instructions it understands.\nThe most common architecture for Laptops and Desktops currently is\n"
+        LinkNode url: https://en.wikipedia.org/wiki/X86-64
+            TextNode "x86 64bit"
+        TextNode " and for Smartphones it is\n"
+        LinkNode url: https://en.wikipedia.org/wiki/ARM_architecture_family
+            TextNode "ARM 64bit"
+        TextNode "."
+    Paragraph
+        TextNode "So one disadvantage from compilers is that for each architecture and for each\nOperating System you need to compile the Application. So if you want to have your\nnew app run on Linux, macOS and Windows for x86 and ARM you need to compile\nyour app 6 times."
+    Paragraph
+        TextNode "One Solution here is to write your application in an language that is interpreted so that\nyou can ship the user directly the source code which they then interpret."
+    Paragraph
+        TextNode "However, this normally results in Applications that are a lot slower\n(about 40-100 times). For many use cases this is acceptable but we can still improve\nthis approach."
+    QuoteBlockNode
+        TextNode " "
+        BoldNode
+            TextNode "Note:"
+        TextNode " The speed I reference here is pure computational. However there might be many other reasons an application "
+        EmphNode
+            TextNode "feels"
+        TextNode " slow."
+    HeaderNode size:2
+        TextNode "The JIT compiler"
+    Paragraph
+        ImageNode url: Drawing_JIT.excalidraw.png, description: 'Drawing JIT'
+    Paragraph
+        TextNode "To improve the performance you can compile (parts of) a program to machine code as you are about to run it. These compilers are called just-in-time(JIT) compilers. Like an interpreter you can just send the user the source code and don't have to compile it for each target. However, unlike an interpreter the application will be a lot faster."
+    Paragraph
+        TextNode "JIT compilers are often integrated into Interpreters. The interpreter starts running a code and generates metrics about the code it runs. Once the interpreter finds a piece that gets run often it will compile this piece with a JIT compiler to machine code which is a lot faster to execute. These interpreters don't compile everything immediately to machine code because the compilation itself also takes some time and for code that isn't executed often it is faster to just interpret it than to compile it to fast machine code."
+    HeaderNode size:2
+        TextNode "Remarks"
+    Paragraph
+        TextNode "I have simplified many concepts here, and I could definitely geek out on very\nspecific details, but I hope you got an overview about the topic of my bachelor\nthesis.\n"
