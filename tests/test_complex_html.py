@@ -1,5 +1,7 @@
 from typing import Self
 
+from inline_snapshot import snapshot
+
 from src.meltdown import HtmlProducer, MarkdownParser
 from src.meltdown.Nodes import BoldNode
 
@@ -11,10 +13,7 @@ def produce(input: str) -> str:
 
 def test_formatted_header():
     src = "## How **I *made* ~~you~~ everyone**"
-    assert (
-        "<h2>How <strong>I <em>made</em> <del>you</del> everyone</strong></h2>"
-        in produce(src)
-    )
+    assert produce(src) == snapshot('<h2>How <strong>I <em>made</em> <del>you</del> everyone</strong></h2>\n')
 
 
 def test_extend_default_bold():
@@ -27,4 +26,4 @@ def test_extend_default_bold():
 
     doc = MarkdownParser().parse("# Hello **friends**!")
     html = CustomHtmlProducer().produce(doc)
-    assert "<h1>Hello <b>friends<b>!</h1>" in html
+    assert html == snapshot('<h1>Hello <b>friends<b>!</h1>\n')

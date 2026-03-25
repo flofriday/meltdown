@@ -1,0 +1,60 @@
+<p><!-- Start writing your markdown here ;) --></p>
+<h2>Getting nerd-sniped</h2>
+<p>A couple of weeks back my friend <a href="https://lprod.dev/">Luis</a>  asked me how my blog works and once I told him that I wrote a custom (very simple) static site generator, he got excited and started to build his own. </p>
+<blockquote> <strong>🦜 Chirpy the Parrot:</strong> Couldn&#x27;t you just use an existing solution like <a href="https://substack.com/">substack</a> or <a href="https://bearblog.dev/">bearblog</a>?</blockquote><p>Of course, and that&#x27;s also what I told him, however as developers we love to  build stuff and it&#x27;s not always about getting the easiest solution but about  the fun of building stuff.</p>
+<p>Anyway, a couple of days later I got a message which as a compiler engineer scared me:</p>
+<p><img src="chat1.png" alt="Chat with friend"/></p>
+<p>Well, there was only one obvious next step: Building a proper markdown parser  and recording my-self doing so that he can learn more about parsers 😝.</p>
+<h2>Wait ... why not regex?</h2>
+<p>If you don&#x27;t spend all day thinking about grammars, LL(1)-conflicts and the  advantages of right-recursion over left-recursion you might be wondering why  I was so terrified by the attempt to parse markdown with regex.</p>
+<p>The simple answer is that regular expression can only express regular languages  but most languages like Markdown are context-free. In less fancy terms this  means that regex just isn&#x27;t strong enough to understand Markdown.</p>
+<p>I think about it in the terms that while regex can count it cannot remember previous counters. For example, the following regex can accept one to five opening  parenthesis and one to five closing ones. </p>
+<pre class="regex"><code>\({1-5}\){1-5}</code></pre>
+<p>However, it doesn&#x27;t enforce that all opening ones have a matching closing one and there is no way to express that in a regex.</p>
+<p><!-- FIXME: I want code blocks in quotes --></p>
+<blockquote> <strong>🦜 Chirpy the Parrot:</strong> actually you can express it with: <code>\((\((\((\((\(()?\))?\))?\))?\))?\)</code></blockquote><p>Yes, Chirpy you are correct, as long as all counts are finite, we can express it  with a hideous regular grammar, however we often don&#x27;t want to limit us to an upper  limit. Also, even if Markdown would enforce upper limits, I would argue that it easier to write a recursive decent parser than such regex.</p>
+<h2>Parsing markdown is <del>hard</del> <em>different</em></h2>
+<p>Before getting lost in the weeds of consuming tokens and unexpected EOFs, we  first need to address the most important question: what to name our baby. And  this is especially hard when the competition is so strong with great hits like  <a href="https://github.com/vmg/sundown">sundown</a>,  <a href="https://github.com/markedjs/marked">marked</a>, <a href="https://github.com/erusev/parsedown">parsedown</a> and  <a href="https://github.com/vmg/redcarpet">redcarpet</a>. However, I quickly discovered  that <strong>meltdown</strong> doesn&#x27;t have a prominent entry, which is just a wrong that  needs to be corrected. As a bonus the package name was also free on  <a href="https://pypi.org/">PyPI</a> and to be honest I just like the confidence it emits. </p>
+<p>With a great name at hand, I fired up VSCode and OBS and started writing a  simple recursive decent  parser. While there is no official Markdown spec the most common is  <a href="https://commonmark.org/">CommonMark</a>, since I am more comfortable with GitHub  flavored markdown, I implemented something along those lines. The goal is to learn more about parsers anyway.</p>
+<p>Pretty soon I discovered a pretty big difference between parsing Markdown and other programming languages, with which I had more experience: <strong>there are no  errors in Markdown</strong>.</p>
+<p>This means if you come across a <em>malformed</em> rule you just decide to interpret it  as something else. For example, if the bold start <code>**</code> is never closed than we just interpret it as text and not as formatting.</p>
+<p>Unfortunately, this leads to quite some ugly code where we cannot insert a  node into our tree until we also found a matching closing tag, and  otherwise need to insert the opening tag as text.</p>
+<pre class="python"><code>def _parse_strikethrough(self: Self) -&gt; list[Node]:
+    self._inside_strikethrough = True
+    children = self._parse_rich_text()
+    self._inside_strikethrough = False
+
+    if not self._match(&quot;~~&quot;):
+        # No closing tag found, insert start as text
+        return [TextNode(&quot;~~&quot;)] + children
+
+    return [StrikeThroughNode(children)]</code></pre>
+<p>This isn&#x27;t too bad. However, sometimes we don&#x27;t want to parse something as rich  text but as unformatted raw input. For example, take inline code, once a backtick appears we parse everything until the next backtick as code and not as richtext. If however, no closing backtick appears we need to insert the initial backtick  as text and go back (rewind) and parse the following content again, but now as rich text.</p>
+<pre class="python"><code>def _parse_code(self: Self) -&gt; Node:
+        start_index = self._index
+        stop_symbols = [&quot;`&quot;, &quot;\n&quot;, &quot;\0&quot;]
+        code = self._consume_till(stop_symbols)
+
+        if not self._match(&quot;`&quot;):
+            # Malformed input, rewind
+            self._index = start_index
+            return TextNode(&quot;`&quot;)
+
+        return CodeNode(code)</code></pre>
+<p>Other than this, meltdown was quite easy to implement. During the implementation I  often tried some edge-cases in other parsers like  <a href="https://try.pandoc.org">try.pandoc.org</a> which really helped. Meltdown still  isn&#x27;t the cleanest implementation but it has quite a few tests and a somewhat  simple API to use:</p>
+<pre class="python"><code>from meltdown import MarkdownParser, HtmlProducer
+
+doc = MarkdownParser().parse(&quot;# Hello **friends**!&quot;)
+html = HtmlProducer().produce(doc)
+print(html)</code></pre>
+<h2>Introducing meltdowns cousin: markberg</h2>
+<p>I recorded myself during the first two hours of meltdowns development and  explained as I went along. At that point the  parser could parse bold, italics and headers and could convert it to html. </p>
+<blockquote> <strong>🦜 Chirpy the Parrot:</strong> Where is the Youtube link?</blockquote><p>Well, I am not that great on camera yet, there are minutes of dead time where I  debug stuff, sometimes some German slips out and at some points I was  frustrated and used profanities. Nothing too bad but also nothing I want to be  on the internet forever.</p>
+<p>However, if you are interested to learn more about parsers, interpreters and  compilers, I cannot recommend <a href="https://craftinginterpreters.com/">Crafting Interpreters</a> enough. </p>
+<p>Anyway, those two videos were enough for Luis to get started on his own markdown  parser, which he lovingly called <strong>markberg</strong>. Since he started out with the same base, both parsers have quite a few things in common. However, Markberg surpassed Meltdown&#x27;s development quite quickly.</p>
+<p>Currently all of <a href="https://lprod.dev/">Luis&#x27;s blog posts</a> (well at the time of writing there is only  one but I am sure more will come) are rendered with markberg. But what&#x27;s more important is that I could demystify parsers for a friend.</p>
+<h2>Porting my blog to meltdown</h2>
+<p>As I mentioned in the beginning my blog uses a super small (single file)  custom static site generator. The script previously shelled out to <a href="https://pandoc.org/">pandoc</a> which converted the markdown to html. </p>
+<p>Now with a self-written markdown parser this didn&#x27;t seem like the right solution anymore. So I expanded the markdown parser to be able to handle all my blog posts without  needing to modify them, published meltdown on PyPI and converted my static site  generator.</p>
+<p>Which means that the article you are reading right now was parsed and converted  to HTML by meltdown.  I don&#x27;t know if it will stay this way forever, it very well might be that  someday I&#x27;ll want to use a complex Markdown feature without messing around with  my parser first, and I&#x27;ll switch it out again. But for now, this seems like a  fun side project.</p>
+<p>You can find meltdown on <a href="https://github.com/flofriday/meltdown">GitHub</a> and  <a href="https://pypi.org/project/meltdown/">PyPI</a>. It still doesn&#x27;t handle all  cases, but if you want an <em>&quot;understandable in an afternoon&quot;️</em> small parser with a  lot of low hanging fruit for contribution it might be the right choice for you.</p>

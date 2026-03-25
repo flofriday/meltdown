@@ -1,49 +1,34 @@
 import os
 
 import pytest
+from inline_snapshot import external_file, register_format_alias
 
 from meltdown import MarkdownParser
+from meltdown.HtmlProducer import HtmlProducer
+
+register_format_alias(".html", ".txt")
 
 
-def get_test_cases() -> list[tuple[str, str]]:
-    """Discover all test case pairs (input/expect files)"""
+def get_test_cases() -> list[str]:
+    """Discover all input files"""
     test_folder = "tests/blog"
-    inputs = [
-        test_folder + "/" + f for f in os.listdir(test_folder) if f.endswith(".md")
-    ]
-    expected = [f.removesuffix(".md") + ".expected.txt" for f in inputs]
-
-    # Create empty expected files for new tests
-    for expect in expected:
-        if not os.path.exists(expect):
-            with open(expect, "w"):
-                pass
-
-    return list(zip(inputs, expected, strict=True))
+    return [test_folder + "/" + f for f in os.listdir(test_folder) if f.endswith(".md")]
 
 
-@pytest.mark.parametrize("input_file,expect_file", get_test_cases())
-def test_convert_from_files(input_file: str, expect_file: str):
-    """Test convert function using input/expect file pairs"""
+@pytest.mark.parametrize("input_file", get_test_cases())
+def test_convert_from_files(input_file: str):
+    """Test convert function using input files"""
 
     with open(input_file, encoding="utf-8") as f:
         markdown = f.read()
 
     parser = MarkdownParser()
-    actual_dump = parser.parse(markdown).dump()
+    document = parser.parse(markdown)
 
-    if os.environ.get("GOLDEN", "").lower() in ("1", "true", "yes"):
-        with open(expect_file, "w", encoding="utf-8") as f:
-            f.write(actual_dump)
-        pytest.skip(f"Updated golden file: {expect_file}")
+    dump = document.dump()
+    dump_filename = input_file.removesuffix(".md") + ".dump.txt"
+    assert dump == external_file(dump_filename)
 
-    with open(expect_file, encoding="utf-8") as f:
-        expected_dump = f.read()
-
-    try:
-        assert actual_dump == expected_dump, f"Test '{input_file}' failed"
-    except AssertionError as e:
-        with open(expect_file.replace("expected.txt", "actual.txt"), "w") as f:
-            f.write(actual_dump)
-
-        raise e
+    html = HtmlProducer().produce(document)
+    html_filename = input_file.removesuffix(".md") + ".html"
+    assert html == external_file(html_filename)
