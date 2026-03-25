@@ -82,4 +82,20 @@ Most of our tests are snapshot tests which you can update with the following if 
 uv run pytest --inline-snapshot=create
 ```
 
-<!--uv run twine upload --repository testpypi dist/*-->
+<!--
+## To publish a new version (only for the maintainer):
+
+You can publish version to a test instance of pypi if you are unsure:
+
+```bash
+uv build
+uv run twine upload --repository testpypi dist/*
+```
+
+And for the production pypi:
+
+```bash
+uv build
+uv run twine upload dist/*
+```
+-->
