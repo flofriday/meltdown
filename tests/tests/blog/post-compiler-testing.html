@@ -1,0 +1,8 @@
+<p>This post is mostly a response to Giacomo&#x27;s amazing article <a href="https://giacomocavalieri.me/writing/testing-can-be-fun-actually"><em>Testing can be fun, actually</em></a> on snapshot testing. </p>
+<p>Over the last couple of months I also added snapshot testing to a couple of my projects and I&#x27;m beyond happy with the change. Not only that, but I&#x27;ve also noticed my behavior changing and that I intuitively added more test cases, since the burden to do so is a lot lower now. Actually my journey to snapshot testing only started <em>because</em> I saw a talk from Giacomo, so thanks again.</p>
+<p>All of this to say the post is amazing, go read it if you haven&#x27;t yet but maybe we can improve upon this because...</p>
+<h2>Code isn&#x27;t just like any other text</h2>
+<p>One of the examples Giacomo uses is a test for Gleam&#x27;s LSP and inside the Gleam compiler there are also many testcases for errors that use snapshot testing.</p>
+<p><strong>img</strong></p>
+<p>This is how such a test looks like for the gleam compiler. To be fair it&#x27;s pretty readable but the thing that keeps bothering me is that there is no syntax highlighting and that the very LSP in my IDE doesn&#x27;t recognize this file as Gleam. And even if I force my editor to interpret the file as Gleam it won&#x27;t work perfectly because the additional frontmatter at the top and the diagnostic output at the bottom doesn&#x27;t make it valid gleam syntax. </p>
+<p>The good thing though is that nothing here is set in stone. So if we modify the snapshot framework a bit the snapshot could look like: </p>
