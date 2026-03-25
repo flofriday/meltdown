@@ -109,7 +109,6 @@ class MarkdownParser:
             if self._peek() in ["*", "-"] and self._peekn(1) in [" ", "\t"]:
                 symbol = self._peek()
                 children.append(self._parse_unordered_list(symbol))
-                print(children[-1].dump())
                 continue
 
             paragraph = self._parse_paragraph()
