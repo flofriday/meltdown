@@ -76,6 +76,10 @@ uv run cli.py tests/blog/post-jit.md
 uv run pytest
 ```
 
-If you change the parser you can update the dump files by setting the `GOLDEN=TRUE` environment variable.
+Most of our tests are snapshot tests which you can update with the following if you add new ones.
+
+```bash
+uv run pytest --inline-snapshot=create
+```
 
 <!--uv run twine upload --repository testpypi dist/*-->
