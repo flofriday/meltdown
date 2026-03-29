@@ -1,7 +1,7 @@
 import argparse
 
 from meltdown import MarkdownParser
-from meltdown.HtmlProducer import HtmlProducer
+from meltdown.HtmlRenderer import HtmlRenderer
 
 
 def main():
@@ -20,7 +20,7 @@ def main():
     if args.dump:
         print(doc.dump())
     else:
-        print(HtmlProducer().produce(doc))
+        print(HtmlRenderer().produce(doc))
 
 
 if __name__ == "__main__":

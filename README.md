@@ -16,35 +16,36 @@ pip install meltdown
 ## Usage
 
 ```python
-from meltdown import MarkdownParser, HtmlProducer
+from meltdown import parse
 
-doc = MarkdownParser().parse("# Hello **friends**!")
-html = HtmlProducer().produce(doc)
+doc = parse("# Hello **friends**!")
+html = doc.render()
 
 print(doc.dump())
 print(html)
 ```
 
-The default `HtmlProducer` is heavily inspired by [pandoc](https://pandoc.org),
-however, if you are unhappy you can easily write your own producer or if only
+The default `HtmlRenderer` is heavily inspired by [pandoc](https://pandoc.org),
+however, if you are unhappy you can easily write your own renderer or if only
 some formattings are unwanted override the default methods.
 
 In the following example we change the bold formatting form `<strong>` to `<b>`:
 
 ```python
-from meltdown import MarkdownParser, HtmlProducer
+from meltdown import parse, HtmlRenderer
 from meltdown.Nodes import *
 from typing import Self
 
-class CustomHtmlProducer(HtmlProducer):
-    def visit_bold(self: Self, node: BoldNode):
-        self._output += "<b>"
+class CustomHtmlRenderer(HtmlRenderer):
+    def visit_bold(self: Self, node: BoldNode) -> str:
+        output += "<b>"
         for child in node.children:
-            child.accept(self)
-        self._output += "<b>"
+            output += child.accept(self)
+        output += "<b>"
+        return output
 
-doc = MarkdownParser().parse("# Hello **friends**!")
-html = CustomHtmlProducer().produce(doc)
+doc = parse("# Hello **friends**!")
+html = doc.render(CustomHtmlRenderer())
 
 print(html)
 ```

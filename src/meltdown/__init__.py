@@ -1,5 +1,5 @@
 # from Nodes import *
-from .HtmlProducer import HtmlProducer as HtmlProducer
+from .HtmlRenderer import HtmlRenderer as HtmlRenderer
 from .MarkdownParser import MarkdownParser as MarkdownParser
 from .Nodes import BoldNode as BoldNode
 from .Nodes import CodeBlockNode as CodeBlockNode
@@ -18,3 +18,7 @@ from .Nodes import QuoteBlockNode as QuoteBlockNode
 from .Nodes import StrikeThroughNode as StrikeThroughNode
 from .Nodes import TextNode as TextNode
 from .Nodes import UnorderedListNode as UnorderedListNode
+
+
+def parse(content: str) -> MarkdownTree:
+    return MarkdownParser().parse(content)

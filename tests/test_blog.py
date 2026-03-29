@@ -4,7 +4,6 @@ import pytest
 from inline_snapshot import external_file, register_format_alias
 
 from meltdown import MarkdownParser
-from meltdown.HtmlProducer import HtmlProducer
 
 register_format_alias(".html", ".txt")
 
@@ -29,6 +28,6 @@ def test_convert_from_files(input_file: str):
     dump_filename = input_file.removesuffix(".md") + ".dump.txt"
     assert dump == external_file(dump_filename)
 
-    html = HtmlProducer().produce(document)
+    html = document.render()
     html_filename = input_file.removesuffix(".md") + ".html"
     assert html == external_file(html_filename)

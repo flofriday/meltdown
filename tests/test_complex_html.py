@@ -2,28 +2,28 @@ from typing import Self
 
 from inline_snapshot import snapshot
 
-from src.meltdown import HtmlProducer, MarkdownParser
-from src.meltdown.Nodes import BoldNode
+from src.meltdown import BoldNode, HtmlRenderer, parse
 
 
 def produce(input: str) -> str:
-    producer = HtmlProducer()
-    return producer.produce(MarkdownParser().parse(input))
+    return parse(input).render()
 
 
 def test_formatted_header():
     src = "## How **I *made* ~~you~~ everyone**"
-    assert produce(src) == snapshot('<h2>How <strong>I <em>made</em> <del>you</del> everyone</strong></h2>\n')
+    assert produce(src) == snapshot(
+        "<h2>How <strong>I <em>made</em> <del>you</del> everyone</strong></h2>\n"
+    )
 
 
 def test_extend_default_bold():
-    class CustomHtmlProducer(HtmlProducer):
-        def visit_bold(self: Self, node: BoldNode):
-            self._output += "<b>"
+    class CustomHtmlRenderer(HtmlRenderer):
+        def visit_bold(self: Self, node: BoldNode) -> str:
+            output = "<b>"
             for child in node.children:
-                child.accept(self)
-            self._output += "<b>"
+                output += child.accept(self)
+            output += "<b>"
+            return output
 
-    doc = MarkdownParser().parse("# Hello **friends**!")
-    html = CustomHtmlProducer().produce(doc)
-    assert html == snapshot('<h1>Hello <b>friends<b>!</h1>\n')
+    html = parse("# Hello **friends**!").render(CustomHtmlRenderer())
+    assert html == snapshot("<h1>Hello <b>friends<b>!</h1>\n")

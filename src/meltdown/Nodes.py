@@ -1,11 +1,13 @@
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import Self
+from typing import Generic, Self, TypeVar
+
+T = TypeVar("T")
 
 
 class Node(ABC):
     @abstractmethod
-    def accept(self: Self, visitor: "MarkdownVisitor"):
+    def accept(self: Self, visitor: "MarkdownVisitor[T]") -> T:
         pass
 
     @abstractmethod
@@ -18,8 +20,8 @@ class MarkdownTree:
     metadata: dict[str, str]
     children: list[Node]
 
-    def accept(self: Self, visitor: "MarkdownVisitor"):
-        visitor.visit_tree(self)
+    def accept(self: Self, visitor: "MarkdownVisitor[T]") -> T:
+        return visitor.visit_tree(self)
 
     def dump(self: Self) -> str:
         out = f"MarkdownTree metadata:{self.metadata}\n"
@@ -27,13 +29,20 @@ class MarkdownTree:
             out += child.dump(1)
         return out
 
+    def render(self: Self, renderer: "Renderer | None" = None) -> str:
+        if renderer is None:
+            from .HtmlRenderer import HtmlRenderer
+
+            renderer = HtmlRenderer()
+        return renderer.render(self)
+
 
 @dataclass(slots=True)
 class ParagraphNode(Node):
     children: list[Node]
 
-    def accept(self: Self, visitor: "MarkdownVisitor"):
-        visitor.visit_paragraph(self)
+    def accept(self: Self, visitor: "MarkdownVisitor[T]") -> T:
+        return visitor.visit_paragraph(self)
 
     def dump(self: Self, indent: int = 0) -> str:
         out = (" " * indent * 4) + "Paragraph\n"
@@ -47,8 +56,8 @@ class HeaderNode(Node):
     header_size: int
     children: list[Node]
 
-    def accept(self: Self, visitor: "MarkdownVisitor"):
-        visitor.visit_header(self)
+    def accept(self: Self, visitor: "MarkdownVisitor[T]") -> T:
+        return visitor.visit_header(self)
 
     def dump(self: Self, indent: int = 0) -> str:
         out = (" " * indent * 4) + f"HeaderNode size:{self.header_size}\n"
@@ -62,8 +71,8 @@ class CodeBlockNode(Node):
     language: str | None
     code: str
 
-    def accept(self: Self, visitor: "MarkdownVisitor"):
-        visitor.visit_code_block(self)
+    def accept(self: Self, visitor: "MarkdownVisitor[T]") -> T:
+        return visitor.visit_code_block(self)
 
     def dump(self: Self, indent: int = 0) -> str:
         # FIXME: The code should be better formatted here.
@@ -76,8 +85,8 @@ class CodeBlockNode(Node):
 class QuoteBlockNode(Node):
     children: list[Node]
 
-    def accept(self: Self, visitor: "MarkdownVisitor"):
-        visitor.visit_quote_block(self)
+    def accept(self: Self, visitor: "MarkdownVisitor[T]") -> T:
+        return visitor.visit_quote_block(self)
 
     def dump(self: Self, indent: int = 0) -> str:
         out = (" " * indent * 4) + "QuoteBlockNode\n"
@@ -90,8 +99,8 @@ class QuoteBlockNode(Node):
 class ListItemNode(Node):
     children: list[Node]
 
-    def accept(self: Self, visitor: "MarkdownVisitor"):
-        visitor.visit_list_item(self)
+    def accept(self: Self, visitor: "MarkdownVisitor[T]") -> T:
+        return visitor.visit_list_item(self)
 
     def dump(self: Self, indent: int = 0) -> str:
         out = (" " * indent * 4) + "ListItemNode\n"
@@ -104,8 +113,8 @@ class ListItemNode(Node):
 class UnorderedListNode(Node):
     items: list[ListItemNode]
 
-    def accept(self: Self, visitor: "MarkdownVisitor"):
-        visitor.visit_unordered_list(self)
+    def accept(self: Self, visitor: "MarkdownVisitor[T]") -> T:
+        return visitor.visit_unordered_list(self)
 
     def dump(self: Self, indent: int = 0) -> str:
         out = (" " * indent * 4) + "UnorderedList\n"
@@ -118,8 +127,8 @@ class UnorderedListNode(Node):
 class EmphNode(Node):
     children: list[Node]
 
-    def accept(self: Self, visitor: "MarkdownVisitor"):
-        visitor.visit_emph(self)
+    def accept(self: Self, visitor: "MarkdownVisitor[T]") -> T:
+        return visitor.visit_emph(self)
 
     def dump(self: Self, indent: int = 0) -> str:
         out = (" " * indent * 4) + "EmphNode\n"
@@ -132,8 +141,8 @@ class EmphNode(Node):
 class StrikeThroughNode(Node):
     children: list[Node]
 
-    def accept(self: Self, visitor: "MarkdownVisitor"):
-        visitor.visit_strikethrough(self)
+    def accept(self: Self, visitor: "MarkdownVisitor[T]") -> T:
+        return visitor.visit_strikethrough(self)
 
     def dump(self: Self, indent: int = 0) -> str:
         out = (" " * indent * 4) + "StrikeThroughNode\n"
@@ -146,8 +155,8 @@ class StrikeThroughNode(Node):
 class BoldNode(Node):
     children: list[Node]
 
-    def accept(self: Self, visitor: "MarkdownVisitor"):
-        visitor.visit_bold(self)
+    def accept(self: Self, visitor: "MarkdownVisitor[T]") -> T:
+        return visitor.visit_bold(self)
 
     def dump(self: Self, indent: int = 0) -> str:
         out = (" " * indent * 4) + "BoldNode\n"
@@ -160,8 +169,8 @@ class BoldNode(Node):
 class CodeNode(Node):
     code: str
 
-    def accept(self: Self, visitor: "MarkdownVisitor"):
-        visitor.visit_code(self)
+    def accept(self: Self, visitor: "MarkdownVisitor[T]") -> T:
+        return visitor.visit_code(self)
 
     def dump(self: Self, indent: int = 0) -> str:
         return (" " * indent * 4) + f"CodeNode code:'{self.code}'\n"
@@ -172,8 +181,8 @@ class LinkNode(Node):
     url: str
     children: list[Node]
 
-    def accept(self: Self, visitor: "MarkdownVisitor"):
-        visitor.visit_link(self)
+    def accept(self: Self, visitor: "MarkdownVisitor[T]") -> T:
+        return visitor.visit_link(self)
 
     def dump(self: Self, indent: int = 0) -> str:
         out = (" " * indent * 4) + f"LinkNode url: {self.url}\n"
@@ -187,8 +196,8 @@ class ImageNode(Node):
     url: str
     description: str
 
-    def accept(self: Self, visitor: "MarkdownVisitor"):
-        visitor.visit_image(self)
+    def accept(self: Self, visitor: "MarkdownVisitor[T]") -> T:
+        return visitor.visit_image(self)
 
     def dump(self: Self, indent: int = 0) -> str:
         out = (
@@ -201,8 +210,8 @@ class ImageNode(Node):
 class TextNode(Node):
     text: str
 
-    def accept(self: Self, visitor: "MarkdownVisitor"):
-        visitor.visit_text(self)
+    def accept(self: Self, visitor: "MarkdownVisitor[T]") -> T:
+        return visitor.visit_text(self)
 
     def dump(self: Self, indent: int = 0) -> str:
         return (
@@ -214,70 +223,75 @@ class TextNode(Node):
 class CommentNode(Node):
     comment: str
 
-    def accept(self: Self, visitor: "MarkdownVisitor"):
-        visitor.visit_comment(self)
+    def accept(self: Self, visitor: "MarkdownVisitor[T]") -> T:
+        return visitor.visit_comment(self)
 
     def dump(self: Self, indent: int = 0) -> str:
         return (" " * indent * 4) + f'CommentNode "{self.comment}"\n'
 
 
-class MarkdownVisitor(ABC):
+class MarkdownVisitor[T](ABC):
     @abstractmethod
-    def visit_tree(self: Self, node: MarkdownTree):
+    def visit_tree(self: Self, node: MarkdownTree) -> T:
         pass
 
     @abstractmethod
-    def visit_paragraph(self: Self, node: ParagraphNode):
+    def visit_paragraph(self: Self, node: ParagraphNode) -> T:
         pass
 
     @abstractmethod
-    def visit_header(self: Self, node: HeaderNode):
+    def visit_header(self: Self, node: HeaderNode) -> T:
         pass
 
     @abstractmethod
-    def visit_code_block(self: Self, node: CodeBlockNode):
+    def visit_code_block(self: Self, node: CodeBlockNode) -> T:
         pass
 
     @abstractmethod
-    def visit_quote_block(self: Self, node: QuoteBlockNode):
+    def visit_quote_block(self: Self, node: QuoteBlockNode) -> T:
         pass
 
     @abstractmethod
-    def visit_unordered_list(self: Self, node: UnorderedListNode):
+    def visit_unordered_list(self: Self, node: UnorderedListNode) -> T:
         pass
 
     @abstractmethod
-    def visit_list_item(self: Self, node: ListItemNode):
+    def visit_list_item(self: Self, node: ListItemNode) -> T:
         pass
 
     @abstractmethod
-    def visit_emph(self: Self, node: EmphNode):
+    def visit_emph(self: Self, node: EmphNode) -> T:
         pass
 
     @abstractmethod
-    def visit_strikethrough(self: Self, node: StrikeThroughNode):
+    def visit_strikethrough(self: Self, node: StrikeThroughNode) -> T:
         pass
 
     @abstractmethod
-    def visit_bold(self: Self, node: BoldNode):
+    def visit_bold(self: Self, node: BoldNode) -> T:
         pass
 
     @abstractmethod
-    def visit_code(self: Self, node: CodeNode):
+    def visit_code(self: Self, node: CodeNode) -> T:
         pass
 
     @abstractmethod
-    def visit_link(self: Self, node: LinkNode):
+    def visit_link(self: Self, node: LinkNode) -> T:
         pass
 
     @abstractmethod
-    def visit_image(self: Self, node: ImageNode):
+    def visit_image(self: Self, node: ImageNode) -> T:
         pass
 
     @abstractmethod
-    def visit_text(self: Self, node: TextNode):
+    def visit_text(self: Self, node: TextNode) -> T:
         pass
 
     @abstractmethod
-    def visit_comment(self: Self, node: CommentNode):
+    def visit_comment(self: Self, node: CommentNode) -> T:
         pass
+
+
+class Renderer(MarkdownVisitor[str], ABC):
+    def render(self: Self, doc: MarkdownTree) -> str:
+        return doc.accept(self)
