@@ -25,6 +25,8 @@ print(doc.dump())
 print(html)
 ```
 
+### Custom renderers
+
 The default `HtmlRenderer` is heavily inspired by [pandoc](https://pandoc.org),
 however, if you are unhappy you can easily write your own renderer or if only
 some formattings are unwanted override the default methods.
@@ -49,6 +51,24 @@ html = doc.render(CustomHtmlRenderer())
 
 print(html)
 ```
+
+### Custom renderer for highlight.js
+
+By default meltdown doesn't do any code highlighting for code blocks but there are some good solution like 
+[highlight.js](https://highlightjs.org/). However to use that library we need to adapt how we render the code blocks to html.
+
+```python
+class CustomHtmlRenderer(HtmlRenderer):
+    def visit_code_block(self: Self, node: CodeBlockNode) -> str:
+        output = "<pre"
+        if node.language is not None:
+            output += f' class="language-{node.language}"'
+        output += "><code>"
+        output += html.escape(node.code)
+        output += "</code></pre>\n"
+        return output
+```
+
 
 ## Development
 

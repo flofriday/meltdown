@@ -1,7 +1,6 @@
 import argparse
 
-from meltdown import MarkdownParser
-from meltdown.HtmlRenderer import HtmlRenderer
+from meltdown import parse
 
 
 def main():
@@ -15,12 +14,12 @@ def main():
     )
     args = parser.parse_args()
     with open(args.filename) as f:
-        doc = MarkdownParser().parse(f.read())
+        doc = parse(f.read())
 
     if args.dump:
         print(doc.dump())
     else:
-        print(HtmlRenderer().produce(doc))
+        print(doc.render())
 
 
 if __name__ == "__main__":
