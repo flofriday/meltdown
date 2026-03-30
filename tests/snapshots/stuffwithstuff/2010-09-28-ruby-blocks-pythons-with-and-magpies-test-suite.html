@@ -1,0 +1,104 @@
+<p>Part of moving a language from &quot;tiny hobby project&quot; to &quot;thing that I hope people will use&quot; is a solid test suite. [Magpie][</p>
+<p>] has a test suite now, but it&#x27;s kind of ugly and is driven mostly from Java. What I&#x27;d like is something more like [RubySpec][</p>
+<p>] for Ruby: a highly readable executable specification for the language, written in itself.</p>
+<p>[magpie]: https://magpie-lang.org/ [rubyspec</p>
+<p>]: http://www.rubyspec.org/</p>
+<p>RubySpec is built on top of RSpec, a Ruby library that provides a DSL-like API for writing tests. Here&#x27;s what a chunk of spec looks like:</p>
+<pre class="ruby"><code>describe &quot;The &#x27;and&#x27; statement&quot; do
+  it &quot;short-circuits evaluation at the first false condition&quot; do
+    x = nil
+    true and false and x = 1
+    x.should be_nil
+  end
+
+  it &quot;evaluates to the first condition not to be true&quot; do
+    (&quot;yes&quot; and 1 and nil and true).should == nil
+    (&quot;yes&quot; and 1 and false and true).should == false
+  end
+
+  it &quot;evaluates to the last condition if all are true&quot; do
+    (&quot;yes&quot; and 1).should == 1
+    (1 and &quot;yes&quot;).should == &quot;yes&quot;
+  end
+end</code></pre>
+<p>I find that wonderful to read. This is exactly the kind of thing that I think gets people excited about Ruby. It relies on two nice features Ruby has: open classes, and block arguments.</p>
+<p>Open classes let us define the &quot;bare functions&quot; of that DSL: <code>describe</code> and <code>it</code> are both methods added to the base <code>Object</code> class. Inside the spec, you&#x27;ll see a lot of calls to <code>.should</code>. That&#x27;s also a method that&#x27;s been patched into <code>Object</code>.</p>
+<h2>Block arguments in Ruby</h2>
+<p>Block arguments are then what get used to create the block structure you see where it appears that <code>describe</code> and <code>it</code> are keyword-like. The actual semantics are delightfully simple. If you do something like this in Ruby:</p>
+<pre class="ruby"><code>blocky(&quot;bar&quot;) do
+  puts &quot;hi&quot;
+end</code></pre>
+<p>The block after <code>do</code> gets wrapped in something like a lambda and passed to the method (<code>blocky</code> here) as another (unnamed) argument. That code basically gets desugared to:</p>
+<pre class="ruby"><code>blocky(&quot;bar&quot;, lambda {
+  puts &quot;hi&quot;
+})</code></pre>
+<p>The method that receives the block can then do stuff before and after it, and invoke it by using <code>yield</code>. It&#x27;s the ability to do stuff before and after that&#x27;s particularly nice. It makes it easy to write context managers or scoped behavior where you have some setup and teardown that you want to wrap around some user-provided behavior.</p>
+<h2>Context Managers in Python</h2>
+<p>When I thought &quot;context manager&quot;, that called to mind a [similar feature][with</p>
+<p>] in Python: <code>with</code>. Python&#x27;s system is a bit more complex and more directly tied to scoped behavior. It looks like this:</p>
+<p>[with]: http://www.python.org/dev/peps/pep-0343/</p>
+<pre class="python"><code>with open(&#x27;somefile.text&#x27;) as f:
+  contents = f.read()</code></pre>
+<p>This does a few things in sequence:</p>
+<p>1.  Evaluates the expression after <code>with</code>.</p>
+<p>2.  If <code>as</code> is provided, binds the result to a named variable.</p>
+<p>3.  Calls the <code>__enter__</code> method on the result. This is where the context     manager can perform setup work.</p>
+<p>4.  Evaluates the body of the <code>with</code> statement.</p>
+<p>5.  Finally, calls <code>__exit__</code> on the context manager so it can do teardown.</p>
+<p>Python&#x27;s system is a good bit more complex, but it&#x27;s also more object-oriented and handles the common scenario of an object that needs to initialize and teardown well.</p>
+<h2>Translating Python to Ruby</h2>
+<p>Both Python and Ruby&#x27;s solutions cover valid use cases, but they seem to overlap so much that it would be overkill to add both. Fortunately, you can implement one in terms of the other. Ruby&#x27;s system is much simpler, so here&#x27;s <code>with</code> implemented using it (minus important exception-handling stuff that I&#x27;ll ignore for now):</p>
+<pre class="ruby"><code>class Object
+  def with(obj)
+    obj.__enter__
+    yield
+    obj.__exit__
+  end
+end</code></pre>
+<p>With that, you can do:</p>
+<pre class="ruby"><code>with File.open(&quot;somefile.text&quot;, &quot;r&quot;) do |f|
+  contents = f.read
+end</code></pre>
+<p>(Of course, you wouldn&#x27;t actually do this in Ruby since its built-in <code>File</code> class already has a nice method to do just this.)</p>
+<h2>Block arguments in Magpie</h2>
+<p>Given that, it seemed like supporting block arguments in Magpie would let me cover both cases. The implementation ended up being only about a dozen lines of code in the parser. There is a new keyword <code>with</code>. If it appears after a message send, a subsequent block is parsed and wrapped in a function.</p>
+<p>That function is then be added as an argument to that message. Unlike Ruby, the block argument isn&#x27;t unnamed. From the method&#x27;s perspective it just becomes another regular argument and it needs to declare a named parameter for it.</p>
+<p>There is one other small piece of syntactic sugar: when Magpie wraps the block in a function, it declares the function to take a single parameter: <code>it</code>. When the method that receives the block invokes it and passes in an argument, that will be bound to <code>it</code>.</p>
+<p>With this in place, I can start moving Magpie&#x27;s test suite to something that looks like this:</p>
+<pre class="magpie"><code>specify(&quot;An &#x27;and&#x27; expression&quot;) with
+  it should(&quot;return the first arg if it is false.&quot;) with
+    (0 and false) shouldBe(0)
+  end
+
+  it should(&quot;return the second arg if the first is true.&quot;) with
+    (0 and 1) shouldBe(1)
+  end
+
+  it should(&quot;short-circuit if the first arg is false.&quot;) with
+    var called = false
+    false and (called = true)
+    called shouldBe(false)
+  end
+end</code></pre>
+<p>Here, <code>specify</code> is a global function the test infrastructure provides. It calls the block argument and passes in a test runner object that gets bound to <code>it</code>. The test runner has a method <code>should</code> that takes a description and the body of a test. <code>specify</code> and <code>it</code> do the setup required to keep track of success and failure.</p>
+<p>The only method we have to patch into <code>Object</code> is <code>shouldBe</code> which is used to verify expected values. The end result is, I think, pretty nice looking, and doesn&#x27;t require much language support or monkey patching.</p>
+<p>Here&#x27;s some other fun stuff it enables:</p>
+<pre class="magpie"><code>// Functional idioms:
+var waldo = people find with it name == &quot;waldo&quot;
+var positives = numbers filter with it &gt; 0
+
+// Context management:
+File open(&quot;name.text&quot;) use with
+  while it eof not do print(it readLine)
+end</code></pre>
+<p>In the last example, <code>use</code> is a method that can be mixed into a class to call setup and teardown methods on the receiver, like:</p>
+<pre class="magpie"><code>def File use(block)
+  this setup
+  block(this)
+  this teardown
+end</code></pre>
+<h2>Multiple arguments</h2>
+<p>Automatically binding the argument to <code>it</code> is nice for a lot of cases, but what if you actually want to pass multiple arguments to the block? To enable that, I&#x27;m planning to add an optional parameter list following <code>with</code>. When present, the interpreter uses that instead of <code>it</code>:</p>
+<pre class="magpie"><code>// Sort by name:
+collection sort with(a, b) a name compareTo(b name)</code></pre>
+<p>And that&#x27;s about it. Not too bad for a handful of code, eh? Now I just have to rewrite Magpie&#x27;s entire test suite to use it... </p>

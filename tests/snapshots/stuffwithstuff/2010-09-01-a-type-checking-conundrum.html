@@ -1,0 +1,67 @@
+<p>Ever since I decided to mesh the worlds of static and dynamic typing together in Magpie, I&#x27;ve been wondering when the gears would really grind together and halt. Today is the day. The issue I&#x27;m running into is one of hidden state, both in closures and in objects. Consider this post a plea for assistance or ideas.</p>
+<h2>A quick intro</h2>
+<p>Just to frame things since you are very likely not at all familiar with Magpie, here&#x27;s the salient features of the language:</p>
+<ul>
+<li>  It&#x27;s a dynamically-typed OOP language like Python or Ruby.</li>
+</ul>
+<ul>
+<li>  You can optionally add type annotations to method parameters or returns.</li>
+</ul>
+<ul>
+<li>  After the top-level of a script is run, but before <code>main()</code> is called, it</li>
+</ul>
+<p>    statically type checks the script to look for errors based on the     annotations you&#x27;ve provided.</p>
+<p>Here&#x27;s a simple example:</p>
+<pre class="magpie"><code>var say(what String -&gt;)
+  print(what)
+end
+
+say(&quot;hey&quot;)</code></pre>
+<p>This program runs fine and does what you expect. Now consider this one:</p>
+<pre class="magpie"><code>var say(what String -&gt;)
+  print(what)
+end
+
+say(123)</code></pre>
+<p>This one actually runs without errors too (and prints &quot;123″ since <code>print</code> converts its argument to a string anyway). That&#x27;s because the call to <code>say(123)</code> is at the top level, which is run before type checking. If we change it to this:</p>
+<pre class="magpie"><code>var say(what String -&gt;)
+    print(what)
+end
+
+var main(-&gt;)
+    say(123)
+end</code></pre>
+<p>Now we correctly get a error that <code>say</code> expects a <code>String</code> and is being passed an <code>Int</code>. The interpreter then stops without ever calling <code>main()</code>.</p>
+<h2>Conundrum!</h2>
+<p>All that so far is fine and dandy. Now lets consider something a little... softer:</p>
+<pre class="magpie"><code>var returnString(-&gt; String)
+  var a = 123
+  a = &quot;string&quot;
+  return a
+end</code></pre>
+<p>This type checks fine too. At the point that we&#x27;re returning <code>a</code>, the type checker knows its a <code>String</code> as expected. But this highlights an important feature: variables can change their type. That makes sense given that Magpie is at its core a dynamic language. It also plays nicely with some other features like [or types][</p>
+<p>].</p>
+<p>[or types]: /2010/08/23/void-null-maybe-and-nothing/</p>
+<p>Unfortunately, it&#x27;s also the heart of the problem. Consider this example:</p>
+<pre class="magpie"><code>var a = 123
+
+var returnInt(-&gt; Int)
+  return a
+end
+
+a = &quot;string&quot;
+returnInt()</code></pre>
+<p>The type checker runs through that top-down. First it evaluates <code>var a = 123</code> and records that <code>a</code> is defined with the type of <code>123</code>: <code>Int</code>. Then it verifies that <code>returnInt()</code> returns its declared type (<code>Int</code>) in the body of the function. It&#x27;s just returning <code>a</code>. It&#x27;s already noted that <code>a</code>&#x27;s type is <code>Int</code>, so everything looks fine.</p>
+<p>Later, it updates the type of <code>a</code> to <code>String</code> but at that point, the damage is done. When this program is run, <code>returnInt()</code> returns a <code>String</code> even though the type checker didn&#x27;t notice the error.</p>
+<p>In this example, the problem manifests through a closure (accessing a variable declared outside of a function&#x27;s scope), but objects can have the exact same problem. A method&#x27;s return type may be based on a field, but that field&#x27;s type could change at any time.</p>
+<h2>Options</h2>
+<p>So, how should Magpie handle this? Options I can think of are:</p>
+<p>1.  <strong>Do some really smart analysis to look at <em>every</em> place a field or     closed-over variable is assigned to and set its type to the union of all of     those.</strong> That seems like the Right Thing to Do, but I&#x27;m pretty sure it&#x27;s     undecidable/intractable/impossible given recursion and other circular     references.</p>
+<p>2.  <strong>Do nothing. Change a variable&#x27;s type at your own risk.</strong> From the static     type system point of view, that seems... dirty. But Magpie never promises     perfect type checking, just more than you get from a completely dynamic     language. It doesn&#x27;t give type guarantees, just type gentleman&#x27;s agreements.</p>
+<p>    Also, like a dynamic language, Magpie won&#x27;t completely die if you pass a     variable of the wrong type to a method, it&#x27;ll just end up with some &quot;method     not found&quot; error. In other words, the &quot;wrong&quot; behavior here is no worse than     every other dynamic language on Earth.</p>
+<p>3.  <strong>Don&#x27;t allow variables to change type.</strong> This is the static language     solution. If a variable can&#x27;t change type after initialization, this problem     vanishes completely. But it feels like a weird thing for a dynamic language     to do.</p>
+<h2>Now what?</h2>
+<p>Not that anyone but me really cares about Magpie, but if you do care enough to have a suggestion, I&#x27;m all ears. I tried scanning through the literature on gradual and optional typing, but I didn&#x27;t see anything that caught my eye. (I believe [Siek&#x27;s][gradual</p>
+<p>] solution is to disallow references to change type.)</p>
+<p>[gradual]: http://ecee.colorado.edu/~siek/gradualtyping.html</p>
+<p>For now, I&#x27;ll just default to &quot;do nothing&quot;, but if there&#x27;s a cleaner solution that can help users catch real type errors before their programs run, that would be super awesome. </p>

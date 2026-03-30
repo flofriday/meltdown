@@ -1,0 +1,259 @@
+<p>It took three years and 200,000 words more than I expected, but my second book, *[Crafting Interpreters][</p>
+<p>]*, is complete. I finished the third draft of the last chapter today, marking the last of around 1,400 days of continuous writing.</p>
+<p>This book was <em>much</em> harder than my [first book][gpp</p>
+<p>], along every axis. It&#x27;s larger, more technically complex, much more deeply intertwined, and it had the misfortune of aligning with a really difficult period in my life. Today feels less like coasting past the finish line at the Tour de France, arms raised in triumph, and more like dragging myself onto the beach, clutching sand in relief after a storm-thrashed ordeal at sea.</p>
+<p>Before I get into all that, I have a minor confession to make. When I finished my first book, I wrote [a long post][post 1</p>
+<p>] about how I cobbled together enough willpower to reach the end of the last page. Everything in there is true, but there is one fact I superstitiously omitted.</p>
+<p>[crafting interpreters]: http://craftinginterpreters.com/ [gpp</p>
+<p>]: http://gameprogrammingpatterns.com/ [post 1]: /2014/04/22/zero-to-95688-how-i-wrote-game-programming-patterns/</p>
+<p>Halfway through writing <em>Game Programming Patterns</em>, I discovered a new passion: programming languages. It had been a long time since a topic ignited my brain to the same degree, and I was <em>on fire</em>. I spent basically every free hour (and many not-so-free hours -- sorry, family) designing and hacking on programming languages. I read [every book I could get my hands on][books</p>
+<p>], [went to conferences][camp</p>
+<p>], [blogged][</p>
+<p>], I even <em>dreamed</em> about programming languages. This infatuation was the main reason I stopped working on my first book for two years.</p>
+<p>[books]: https://twitter.com/munificentbob/status/901543375945388032 [camp</p>
+<p>]: /2010/07/23/what-i-learned-at-the-emerging-languages-camp/ [blogged]: /category/language/</p>
+<p>I have a personality quirk where when I&#x27;m excited about something I just <em>have</em> to teach it to other people. Hermione Granger, arm waving feverishly to get the teacher&#x27;s attention, is my spirit animal. It was inevitable that I would write something about interpreters. But I couldn&#x27;t just drop one half-finished book to start another. I have gigs of unfinished projects laying around, but -- maybe because the completed chapters were already online -- I couldn&#x27;t bear to abandon <em>Game Programming Patterns</em>.</p>
+<p>So I made a promise to myself. If I finished that book, then I would let myself write a second book on interpreters. In part because of that promise, I <em>did</em> manage to complete the chapters, and then [the print and e-book editions][print</p>
+<p>]. What I thought was merely a hobby and personal goal turned out to be a [life-changing experience][launch</p>
+<p>]. My little self-published vanity project has [hundreds of five-star reviews][star</p>
+<p>], and has been translated to Korean, Japanese, Chinese, German, and Polish. The book did so much better than I expected that I&#x27;m still not sure how to process it, beyond feeling immense gratitude to everyone who read it, bought a copy, or cheered me on.</p>
+<p>[launch]: /2014/11/20/how-my-book-launch-went/ [star</p>
+<p>]: https://www.amazon.com/dp/0990582906 [print]: /2014/11/03/bringing-my-web-book-to-print-and-ebook/</p>
+<h2>The seed of a book</h2>
+<p>Once I finished the print edition of <em>Game Programming Patterns</em>, I took some time off. But it didn&#x27;t take too long for that itch to write about interpreters to come back. I knew exactly what I was getting into with writing a book now, how hard the grind can be. At first, I just noodled around. I wasn&#x27;t committed to doing anything. It was more a sort of recreational intellectual exercise. If I <em>were</em> to do a book, what would it look like? You know, <em>hypothetically speaking</em>.</p>
+<p>The very first note I wrote to myself said:</p>
+<pre><code>high-level goal: a *small* book that builds a complete, efficient
+interpreter. instead of a wide text about programming language*s*,
+it is a single path through the language space. aim for 60k words.</code></pre>
+<p>My first book was about 90,000 words, and I didn&#x27;t want to hike a trail that long again. I also had a meta-goal to make programming languages more approachable, and I figured a short text would help. I had this vision of something you could literally hold in your hand or have open next to your laptop while you followed along.</p>
+<p>To make a small book, I needed a small language and a small implementation. One of my other side projects was [a scripting language named Wren][wren</p>
+<p>]. Wren is written in C, with a simple single-pass bytecode compiler inspired by Lua. Building Wren taught me how much functionality you can pack into a few thousand lines of clean C code.</p>
+<p>[wren]: http://wren.io/</p>
+<p>For this hypothetical book, I figured [a bytecode VM in C][bytecode</p>
+<p>] like that would be a great fit. It would also give me the chance to cover a bunch of really fun topics like stack-based VMs, object representation, and garbage collection. But Wren wasn&#x27;t the right language. I like Wren (obviously), but it has some design quirks that I think make it a better language for <em>users</em> but maybe not for teaching. For the book, I wanted a dynamically-typed scripting language in the vein of languages like JavaScript, Python, and Lua.</p>
+<p>[bytecode]: http://craftinginterpreters.com/a-bytecode-virtual-machine.html</p>
+<p>I started tinkering on a new toy language, tentatively named &quot;Vox&quot;. The goal was to keep things as simple as possible without taking any shortcuts around the hard problems in implementing a language. I wanted a rich expression and statement syntax to cover parsing. First-class functions and closures because they are powerful and challenging to implement efficiently. Classes and methods because that paradigm is so prevalent but omitted by many compiler books.</p>
+<p>At some point, I realized that dropping readers straight into C was too unfriendly of an introduction. It&#x27;s hard to teach high-level concepts like parsing and name resolution while also tracking pointers and managing memory. OK, so we&#x27;ll build <em>two</em> interpreters. First, [a simple one in a high-level language][tree</p>
+<p>] to focus on concepts. Then a second bytecode VM in C to focus on performance and low-level implementation techniques.</p>
+<p>[tree]: http://craftinginterpreters.com/a-tree-walk-interpreter.html</p>
+<p>Somehow, I didn&#x27;t notice that maybe this &quot;handbook&quot; wasn&#x27;t going to be as pocket-sized as I hoped.</p>
+<p>My first choice for the high-level implementation language was JavaScript. I implemented most of a Vox interpreter in JS, but never really liked it. I wanted to write the interpreter in an object-oriented style because there are techniques like the [Visitor pattern][</p>
+<p>] for doing language stuff in OOP that aren&#x27;t covered well elsewhere. Doing OOP in JS means deciding whether to use classes or a prototypal style. The former is cleaner but infuriates some segment of readers. The latter is verbose and confusing to those not already steeped in prototypes.</p>
+<p>[visitor pattern]: http://craftinginterpreters.com/representing-code.html#the-visitor-pattern</p>
+<p>Also, I missed static types. People reading code in a book don&#x27;t get the luxury of seeing the code in a debugger where they can see what values are in various variables. Static type annotations in the code help.</p>
+<p>So I switched to Java. I don&#x27;t love Java but it seemed like the least biased choice for a statically typed object-oriented language. I found you can tame a lot of its infamous verbosity by simply not programming in 1990s enterprise Java style. Maybe it&#x27;s not idiomatic to have public fields, but it&#x27;s a hell of a lot shorter.</p>
+<p>In parallel, I started building the bytecode VM in C, porting over bits of Wren&#x27;s implementation and stripping out the Wren-specific stuff. I spent the spring and summer of 2016 circling between these three pieces -- the design of Vox itself, the Java interpreter, and the C bytecode VM. This was a delightful, satisfying period of time. The three parts played off each other in challenging ways. Sometimes I would change the language to make one interpreter simpler, but find doing so made the other interpreter more complex. Other times I&#x27;d hit on some trick that made everything get smaller and cleaner.</p>
+<h2>Getting back on the horse</h2>
+<p>I remember the exact moment I committed to writing the book. I was stuck on a tricky language design problem: constructor syntax. I knew I wanted classes, which meant some way to construct instances. Adding a <code>new</code> keyword felt too special-purpose for my minimal language. I like Smalltalk and Ruby&#x27;s approach of making <code>new</code> be a method on the class object itself, but that requires metaclasses and a lot of other machinery.</p>
+<p>I was struggling to find a way to add instantiation without making the language much bigger. Then I remembered JavaScript&#x27;s thing where you can simply invoke a &quot;class&quot; as if it were a function to create new instances. That has all sorts of weird baggage in JavaScript because everything does in JS, but the concept and syntax were perfect. I already had first-class classes. And I already had closures which meant a function call syntax that could be applied to arbitrary expressions. So &quot;constructors&quot; just became what you got when you invoked a class.</p>
+<p>I felt like Vox had gelled, like it <em>was</em> a language now. And my two implementations were coming along well too. I was surprised by how few hacks or ugly corners I ran into. The codebases kind of fell together and the more I tweaked them, the nicer they got. It felt more like I had discovered them than that I had created them. It would be a shame to <em>not</em> write the book and put them out there into the world. They wanted me to.</p>
+<p>I committed to writing the book, and I restarted my rule of writing every single day.</p>
+<p>I had a few thousand lines of pretty Java and C code, but how do I turn that into a book that can be read in linear order? Compact codebases tend to be highly intertwined with many cyclic dependencies. I didn&#x27;t want readers to have to slog through ten chapters before they could even run <code>main()</code>.</p>
+<p>This was the real technical challenge of writing the book -- how do I take two implementations of the same language, and break them into incremental pieces that I can build up a chapter at a time?</p>
+<p>I made this problem harder for myself because of the meta-goal I had. One reason I didn&#x27;t get into languages until later in my career was because I was intimidated by the reputation compilers have as being only for hardcore computer science wizard types. I&#x27;m a college dropout, so I felt I wasn&#x27;t smart enough, or at least wasn&#x27;t educated enough to hack it. Eventually I discovered that those barriers existed only in my mind and that anyone <em>can</em> learn it.</p>
+<p>My main overarching goal of the book is to pass on that feeling, to get readers to understand there&#x27;s no magic in there and nothing keeping them out. To nail that conceit, I wanted to include <em>every single line of code</em> used by the interpreters in the book. No parser generators, nothing left as an exercise for the reader. If you type in all of the code in the book, you get two complete, working interpreters. No tricks.</p>
+<p>So not only did I need to break these two interpreters into chapters, I needed to do it without any cheating. I wanted a hard guarantee that at the end of each chapter, you had a program that you could type in, compile, run, and do something with. I knew I wouldn&#x27;t be able to verify this manually, so it was time to create some tools.</p>
+<h2>A bespoke build system</h2>
+<p>I [wrote my first book in Markdown][gpp md</p>
+<p>]. I slapped together [a tiny Python script][gpp script</p>
+<p>] that converts the Markdown to HTML and transcludes the code snippets which are stored in separate C++ files. When I started my second book, I took that script and started growing it. It evolved throughout writing the book, but in the end, here is how it works.</p>
+<p>[gpp md]: https://github.com/munificent/game-programming-patterns/tree/master/book [gpp script</p>
+<p>]: https://github.com/munificent/game-programming-patterns/blob/master/script/format.py</p>
+<p>All of the code for the interpreters are stored in separate source files. I have a [Java project][java</p>
+<p>] that contains the complete Java interpreter that you get by the end of that part of the book. Likewise, there&#x27;s a [C project][c</p>
+<p>] for the bytecode VM. I can edit and build those in an IDE, run tests, debug them, etc. They&#x27;re real programs.</p>
+<p>[java]: https://github.com/munificent/craftinginterpreters/tree/master/java/com/craftinginterpreters [c</p>
+<p>]: https://github.com/munificent/craftinginterpreters/tree/master/c</p>
+<p>Meanwhile, the text of the book is [authored in Markdown][md</p>
+<p>], one file per chapter, just like my first book. To include a snippet of code in the book, I put a tag in the Markdown like this:</p>
+<p>[md]: https://github.com/munificent/craftinginterpreters/tree/master/book</p>
+<pre><code>Which can be any of:
+
+^code is-alpha
+
+Once we&#x27;ve found an identifier, we scan the rest of it using:</code></pre>
+<p>Here, the <code>^code</code> line says &quot;look up the snippet named &#x27;is-alpha&#x27; and insert it here.&quot; When the build script generates the HTML for this chapter, it goes off and hunts through the code for that snippet. Over in the code, special comments delimit snippets. The one included here looks like this:</p>
+<pre class="c"><code>//&gt; Scanning on Demand is-alpha
+static bool isAlpha(char c) {
+  return (c &gt;= &#x27;a&#x27; &amp;&amp; c &lt;= &#x27;z&#x27;) ||
+         (c &gt;= &#x27;A&#x27; &amp;&amp; c &lt;= &#x27;Z&#x27;) ||
+          c == &#x27;_&#x27;;
+}
+//&lt; Scanning on Demand is-alpha</code></pre>
+<p>The <code>//&gt;</code> line begins the snippet and says what chapter the snippet appears in and the name of the snippet. The <code>//&lt;</code> line ends the snippet. Pretty straightforward.</p>
+<p>This let me build the book, but didn&#x27;t ensure that the thing I built actually worked. So I wrote a separate script that instead of building the <em>book</em>, builds <em>programs</em>. For each chapter, it collects <em>all</em> of the snippets that appear in that chapter and the previous ones and writes them out to separate source files. In other words, it produces a separate interpreter, one for each chapter, containing only the code that readers have seen so far.</p>
+<p>I put together a Makefile to build those per-chapter versions of each interpreter to make sure they compiled. Of course, compiling successfully doesn&#x27;t mean they do anything <em>useful</em>. Writing a single correct interpreter is hard. Writing thirty of them -- there are [thirty chapters][chapters</p>
+<p>] in the book -- is much harder.</p>
+<p>[chapters]: http://craftinginterpreters.com/contents.html</p>
+<p>I had already harvested a little [test runner][</p>
+<p>] from Wren and ported most of Wren&#x27;s tests over to be [Lox tests][</p>
+<p>]. (I changed the name of the language in the book since there was already a language out there named &quot;Vox.&quot;). I took that test runner and extended it to be able to run the tests on each chapter&#x27;s version of the interpreters. Of course, the tests don&#x27;t all pass -- the interpreters aren&#x27;t complete! So I added metadata to track which tests I expected to pass by which point in the book. With this in place, I could automatically verify that the code that I was showing readers did exactly what I expected.</p>
+<p>[test runner]: https://github.com/munificent/craftinginterpreters/blob/master/util/test.py [lox tests</p>
+<p>]: https://github.com/munificent/craftinginterpreters/tree/master/test</p>
+<h3>More complex snippets</h3>
+<p>The snippet markers look pretty straightforward, and in many cases they are. But reality tends to get messier and I didn&#x27;t allow myself to sweep any of that mess under nearby rugs. Some changes don&#x27;t just <em>add</em> code to the interpreter. I try to minimize it, but often you need to <em>replace</em> some existing code. A few lines of code may appear in chapter 5 and then later get superseded in chapter 9 by something more powerful.</p>
+<p>Obviously, I can&#x27;t jam both of those snippets into the same source file and expect it to compile. Remember, the source files that I hand author are themselves valid Java and C programs that I can build and run. If a function contained several versions of its body mixed together, odds are slim that the compiler will like what it sees.</p>
+<p>So, for any piece of code that later gets replaced -- in other words code that is not part of the very final version of each interpreter -- there is a different snippet syntax:</p>
+<pre class="c"><code>static void concatenate() {
+/* Strings concatenate &lt; Garbage Collection concatenate-peek
+  ObjString* b = AS_STRING(pop());
+  ObjString* a = AS_STRING(pop());
+*/
+//&gt; Garbage Collection concatenate-peek
+  ObjString* b = AS_STRING(peek(0));
+  ObjString* a = AS_STRING(peek(1));
+//&lt; Garbage Collection concatenate-peek
+
+  int length = a-&gt;length + b-&gt;length;
+  char* chars = ALLOCATE(char, length + 1);
+  memcpy(chars, a-&gt;chars, a-&gt;length);
+  memcpy(chars + a-&gt;length, b-&gt;chars, b-&gt;length);
+  chars[length] = &#x27;\0&#x27;;
+}</code></pre>
+<p>This block comment contains a snippet of code. The header indicates that this snippet is named &quot;concatenate&quot; and first appears in the &quot;Strings&quot; chapter. Then, later, it gets removed when the &quot;concatenate-peek&quot; snippet in the &quot;Garbage Collection&quot; chapter appears. In other words, that latter snippet replaces the previous two lines.</p>
+<p>By storing the code for this snippet inside a block comment, I ensure that the code as it is in the raw source file is still valid. In some places where the interpreter gets revised multiple times, the code can get pretty complex. Here is the <code>main()</code> function of the bytecode VM:</p>
+<pre class="c"><code>int main(int argc, const char* argv[]) {
+//&gt; A Virtual Machine main-init-vm
+  initVM();
+
+//&lt; A Virtual Machine main-init-vm
+/* Chunks of Bytecode main-chunk &lt; Scanning on Demand args
+  Chunk chunk;
+  initChunk(&amp;chunk);
+*/
+/* Chunks of Bytecode main-constant &lt; Scanning on Demand args
+
+  int constant = addConstant(&amp;chunk, 1.2);
+*/
+/* Chunks of Bytecode main-constant &lt; Chunks of Bytecode main-chunk-line
+  writeChunk(&amp;chunk, OP_CONSTANT);
+  writeChunk(&amp;chunk, constant);
+
+*/
+/* Chunks of Bytecode main-chunk-line &lt; Scanning on Demand args
+  writeChunk(&amp;chunk, OP_CONSTANT, 123);
+  writeChunk(&amp;chunk, constant, 123);
+*/
+/* A Virtual Machine main-chunk &lt; Scanning on Demand args
+
+  constant = addConstant(&amp;chunk, 3.4);
+  writeChunk(&amp;chunk, OP_CONSTANT, 123);
+  writeChunk(&amp;chunk, constant, 123);
+
+  writeChunk(&amp;chunk, OP_ADD, 123);
+
+  constant = addConstant(&amp;chunk, 5.6);
+  writeChunk(&amp;chunk, OP_CONSTANT, 123);
+  writeChunk(&amp;chunk, constant, 123);
+
+  writeChunk(&amp;chunk, OP_DIVIDE, 123);
+*/
+/* A Virtual Machine main-negate &lt; Scanning on Demand args
+  writeChunk(&amp;chunk, OP_NEGATE, 123);
+*/
+/* Chunks of Bytecode main-chunk &lt; Chunks of Bytecode main-chunk-line
+  writeChunk(&amp;chunk, OP_RETURN);
+*/
+/* Chunks of Bytecode main-chunk-line &lt; Scanning on Demand args
+
+  writeChunk(&amp;chunk, OP_RETURN, 123);
+*/
+/* Chunks of Bytecode main-disassemble-chunk &lt; Scanning on Demand args
+
+  disassembleChunk(&amp;chunk, &quot;test chunk&quot;);
+*/
+/* A Virtual Machine main-interpret &lt; Scanning on Demand args
+  interpret(&amp;chunk);
+*/
+//&gt; Scanning on Demand args
+  if (argc == 1) {
+    repl();
+  } else if (argc == 2) {
+    runFile(argv[1]);
+  } else {
+    fprintf(stderr, &quot;Usage: clox [path]\n&quot;);
+    exit(64);
+  }
+  
+  freeVM();
+//&lt; Scanning on Demand args
+/* A Virtual Machine main-free-vm &lt; Scanning on Demand args
+  freeVM();
+*/
+/* Chunks of Bytecode main-chunk &lt; Scanning on Demand args
+  freeChunk(&amp;chunk);
+*/
+  return 0;
+}</code></pre>
+<p>Maintaining this is not super fun. But, thankfully, I have a build and test system to tell me when I break something.</p>
+<h2>Slicing up the interpreters</h2>
+<p>So I had a tool that could let me split the interpreters across the chapters. If it was possible to break these interpreters into chapters at all, it would let me do so. Now I just had to figure out where to carve the seams. This was the most technically challenging part of the book writing process. I wasn&#x27;t sure if it was going to work at all.</p>
+<p>I spent several weeks sketching out potential lists of chapters, sprinkling snippet markers throughout the code, and seeing if the result built. I&#x27;d get a compile error because a snippet in an early chapter tried to call a function in some later chapter and I would have to go back and reorganize things. I hand-drew dependency graphs between language features and tried to untangle them.</p>
+<p>Here&#x27;s an example of how this process unfolded:</p>
+<p>1.  To teach functions I want show that recursion works.</p>
+<p>2.  But to have recursive functions I need control flow. Otherwise, every     recursive function recurses infinitely without a base case. So control flow     has to come before functions.</p>
+<p>3.  For control flow, I need side effects so that I can show that a certain code     path is <em>not</em> taken. The obvious way to do side effects is to have a     <code>print()</code> function that displays output.</p>
+<p>4.  But I don&#x27;t have functions yet. That&#x27;s a cycle. Crap.</p>
+<p>Sometimes I had to change the language itself to break cycles. The above example is why Lox has a built in print <em>statement</em> instead of a print <em>function</em>. Because that way we can introduce the print statement before control flow, which is in turn before functions.</p>
+<p>I had to break a couple of cycles like that but, eventually, to my surprise, I got it all sorted out. I had a complete list of chapters for both interpreters. Every line of code was sorted into a snippet that belonged to one of those chapters. I could build and run each chapter&#x27;s code. Best of all, each chapter had a reasonably coherent concept and a roughly similar amount of code.</p>
+<p>Before, I felt like I had a language and code that wanted to get out there into the world. Now I felt like I had a book. Or, at least, I had all of the <em>code</em> for a book.</p>
+<h2>A chapter at a time</h2>
+<p>I wrote my first book one chapter at a time. I drafted, edited, illustrated each chapter and put it online before moving to the next one. Serial publishing for the digital age. I really loved that process. It helped build an audience for the book and gave me incremental feedback which made the book better and kept me going. I don&#x27;t think I could write a whole book in the dark.</p>
+<p>I intended to publish this book the same way, but the deeply interconnected nature of the chapters made that much harder. I didn&#x27;t want to discover a problem with the code in chapter 28 that forced me to tweak things in an earlier chapter that readers had already read. I didn&#x27;t want to paint myself into a corner or invalidate any previously-published material.</p>
+<p>So the entire time I was designing the language, coding the interpreters, and splitting the codebases into chapters, I had not done any actual writing. I didn&#x27;t want to put down any prose until I knew the code was solid. So I spent the summer of 2016 just hacking on code. It was, honestly, a blast. The programming part is definitely the fun part, and it was a joy to tinker on the code and figure out how to break it into chapters. Sort of like making a jigsaw puzzle and solving it at the same time.</p>
+<p>After a few months, it was all there. Every single line of code for the entire book. A complete list of chapters. And I hadn&#x27;t written a single word of prose. In theory, &quot;all&quot; that remained was writing some text to explain the code I had already written along with some pictures. But, for me at least, English is a much more taxing language to write than C or Java. I had all of the difficult work ahead of me, and all of the fun was done.</p>
+<h2>Illustrating by hand</h2>
+<p>Well, not all of the fun. I did still have the illustrations to do. With my last book, I hand-drew little sketchy diagrams to show various bits of architecture. I wanted even more illustrations for this book to make the concepts less abstract, less opaque. Unlike a videogame, you can&#x27;t <em>see</em> a garbage collector doing its thing. Visual metaphors really help.</p>
+<p>I liked the hand-drawn look. It furthered my meta-goal of making the material more approachable, more human. But I wanted to up the quality. I wanted them to be more intricate and contain more information. I wanted the drawings to be more detailed. Less like margin doodles and more like, well, <em>illustrations</em>. Maybe even some lowercase letters.</p>
+<p>The ultimate goal for me is a print book, so I stuck with black and white ink. I wanted a tighter, more &quot;spidery&quot; style, so I got some technical pens. People often ask me what programs I used for the illustrations, assuming I did them all digitally. Here are the main tools I used:</p>
+<p>&lt;figure&gt;   &lt;img class=&quot;framed&quot; src=&quot;/image/2020/04/tools.jpg&quot;&gt;   &lt;figcaption&gt;I went with Pigma Microns in 01 and 005. If I were doing it   again, I think I&#x27;d do Faber-Castell Pitt pens.&lt;/figcaption&gt; &lt;/figure&gt;</p>
+<p>There are two kinds of illustrations in the books: diagram-like ones that show meaningful information, and drawings that are for metaphors or just to be silly jokes. The process is different for each.</p>
+<p>I draw each diagram in pencil on graph paper. That lets me erase and move things around until I get it where I like:</p>
+<p>&lt;figure&gt;   &lt;img class=&quot;framed&quot; src=&quot;/image/2020/04/pencil.jpg&quot;&gt;   &lt;figcaption&gt;All of the vertical and horizontal lines in the illustrations   generally fall on the graph paper rules or halfway between them.&lt;/figcaption&gt; &lt;/figure&gt;</p>
+<p>Then I tape a piece of tracing paper on top and draw over it in ink:</p>
+<p>&lt;figure&gt;   &lt;img class=&quot;framed&quot; src=&quot;/image/2020/04/ink.jpg&quot;&gt;   &lt;figcaption&gt;I make mistakes sometimes, usually when lettering like &quot;upvaluels&quot;   here. I fix that in Photoshop after scanning.&lt;/figcaption&gt; &lt;/figure&gt;</p>
+<p>I hand letter everything. It takes a <em>long</em> time. I used to do graphic design, and I have this weird tic where any time I see something that looks handwritten, I look for multiple instances of the same letter to see if they are different or if the design just used a handwriting font. It&#x27;s almost always a handwriting font and I die a little inside to see the illusion evaporate.</p>
+<p>Well, this is <em>my</em> damned book and no reader will ever feel that disappointment. Every single fucking letter in every one of the illustrations was hand lettered and is unique.</p>
+<p>&lt;figure&gt;   &lt;img class=&quot;framed&quot; src=&quot;/image/2020/04/title.jpg&quot;&gt;   &lt;figcaption&gt;Here is the hand-lettered logotype for the book. Each &quot;R&quot; is   different!&lt;/figcaption&gt; &lt;/figure&gt;</p>
+<p>Also, if that&#x27;s not obsessive enough, I spent time <em>changing my own handwriting</em> to better match the text font of the book. I taught myself to write double-story &quot;a&quot; and &quot;g&quot; letters and practiced by filling pages of paper with the same letter over and over.</p>
+<p>&lt;figure&gt;   &lt;img class=&quot;framed&quot; src=&quot;/image/2020/04/lettering.jpg&quot;&gt;   &lt;figcaption&gt;Look at the loop under the &quot;g&quot; in &quot;filling&quot; and the finial on the   &quot;a&quot; in &quot;apples&quot;.&lt;/figcaption&gt; &lt;/figure&gt;</p>
+<p>I also wanted to make sure that the illustrations and text matched each other across the book. To give the text a consistent size, I printed a little height guide:</p>
+<p>&lt;figure&gt;   &lt;img class=&quot;framed&quot; src=&quot;/image/2020/04/metrics.jpg&quot;&gt;   &lt;figcaption&gt;The dotted line indicates the x-height. I picked a ratio for that   to match the fonts I use for text and code.&lt;/figcaption&gt; &lt;/figure&gt;</p>
+<p>I slid this paper under the tracing paper and lettered on top of those lines to keep the metrics the same across the book.</p>
+<p>To keep the diagram size and line thickness consistent, each illustration has a pair of registration marks a fixed distance apart:</p>
+<p>&lt;figure&gt;   &lt;img class=&quot;framed&quot; src=&quot;/image/2020/04/registration.jpg&quot;&gt;   &lt;figcaption&gt;The little marks that the pencils are pointing at.&lt;/figcaption&gt; &lt;/figure&gt;</p>
+<p>I scan each illustration into Photoshop for clean up and processing. I use those marks when cropping to ensure that the image maintains the right size relative to other images.</p>
+<p>I recorded a video of the whole process if you want to see it in action:</p>
+<p>&lt;figure&gt;   &lt;iframe width=&quot;560&quot; height=&quot;315&quot; src=&quot;https://www.youtube.com/embed/iN1MsCXkPSA&quot; frameborder=&quot;0&quot; allow=&quot;accelerometer; autoplay; encrypted-media; gyroscope; picture-in-picture&quot; allowfullscreen&gt;&lt;/iframe&gt;   &lt;figcaption&gt;Even in timelapse, it takes a long time.&lt;/figcaption&gt; &lt;/figure&gt;</p>
+<p>Writing this all out makes me sound like a crazy person. What the hell am I doing with my life? Or, more importantly, what <em>could I have been doing</em> instead of doing all that?</p>
+<p>Too late now, I guess. The picture-like drawings have a different workflow since they don&#x27;t have a lot of straight lines or align to a grid.</p>
+<p>&lt;figure&gt;   &lt;img class=&quot;framed&quot; src=&quot;/image/2020/04/drawing.jpg&quot;&gt;   &lt;figcaption&gt;How will readers understand what a stack is without this helpful   illustration?&lt;/figcaption&gt; &lt;/figure&gt;</p>
+<p>I draw those on regular sketch paper using a non-photo blue pencil. Then I ink on top of that. I scan the paper in RGB and use the blue channel, which mostly makes the blue pencil marks disappear.</p>
+<p>&lt;figure&gt;   &lt;img class=&quot;framed&quot; src=&quot;/image/2020/04/blue.jpg&quot;&gt;   &lt;figcaption&gt;The sketch paper bleeds the ink more than I like but I didn&#x27;t   want to change paper partway through the book, so I stuck with it.&lt;/figcaption&gt; &lt;/figure&gt;</p>
+<p>It&#x27;s a lot of work for each image, and this doesn&#x27;t include all of the work after scanning it. And I wanted a lot of them. By the end, I had this stack of paper:</p>
+<p>&lt;figure&gt;   &lt;img class=&quot;framed&quot; src=&quot;/image/2020/04/stack.jpg&quot;&gt;   &lt;figcaption&gt;Such a small image for so much work.&lt;/figcaption&gt; &lt;/figure&gt;</p>
+<p>I went through two full pads of tracing paper, two pads of graph paper, a sketch pad, and several pens. I drew 181 illustrations.</p>
+<h2>Writing is suffering</h2>
+<p>I had the code, and I had a process for illustrations. The remaining work was just writing all the words and drawing all the pictures. So that&#x27;s what I did. I started at chapter one and started writing. For each chapter, I wrote an outline and then a first draft. I did an editing pass over that to fix all the major problems. Then a second pass where I read the whole chapter out loud to fix cadence and other stuff.</p>
+<p>This is the same process I used for the first book. I stumbled onto something that worked, so I wasn&#x27;t about to mess it up. I posted each chapter online, and then spent a day fixing bugs that readers noticed. Then I moved on to the next chapter.</p>
+<p>I wrote. And wrote. And wrote. Every single day. Every now and then I would have a trip or something where I couldn&#x27;t write. As with my first book, I would bank days by writing multiple sessions per day beforehand and then spend those banked days on days that I didn&#x27;t write. But for the most part, I wrote every day.</p>
+<p>In the blog post I wrote after my first book, I whined about how I had to write on days when I traveled for work, on holidays, when the kids had sniffles. At the time, it truly was one of the hardest things I&#x27;ve ever done.</p>
+<p>This time was something else entirely. I wrote the day my grandfather died (peacefully, unsurprisingly) and the day my aunt died (tragically, days after retiring). I wrote the day I found out my Mom had cancer and my children saw me cry for the first time. I was flying to Louisiana to keep my Mom company when I turned on my phone during the layover and discovered a dear friend had had a stroke. I wrote that evening. I woke up the next day and found out she had died. I wrote that morning sitting next to my brother in the waiting room of the hospital while my Mom got her PET scan.</p>
+<p>The morning of my friend&#x27;s memorial service, I wrote in the hotel. Later that day, I openly sobbed in front of a room full of people. The next day, my wife found out her aunt had terminal cancer. I wrote on the flight home.</p>
+<p>See that dog up there in my profile photo? That&#x27;s Ginny. She&#x27;s on the back cover of my first book. Her myriad health problems finally [caught up with her][ginny</p>
+<p>] last spring. People sometimes ask, &quot;When did you know you were an adult?&quot; For me it was the day I made the call to put my dog down. The hardest part was watching my kids say goodbye to her. I&#x27;m tearing up now writing about it. I ran my fingers through Ginny&#x27;s silky fur as the sedatives took her away. I only got through 59 words that afternoon.</p>
+<p>[ginny]: https://twitter.com/munificentbob/status/1100898048811491328</p>
+<p>I wrote the day the US somehow elected a racist, abusive, corrupt demagogue, and every day afterwards as I saw my country and others turn towards hate and authoritarianism. I wrote while climate change and income inequality worsened. And now here I am writing at home on the same desk where I work now, quarantined like most of you all, hoping to survive the worst pandemic the world has seen in a century.</p>
+<p>This is not about how disciplined I was. Because during what have been some of the worst years of my life, a weird inversion happened. It&#x27;s not that I was going through that shit and still writing <em>in addition to</em> it. I <em>had</em> to keep writing. Writing was one thing I could still control in the face of many things I could not. If I could make it through the book, maybe I could make it through the other things too. If I had skipped a day it would have meant that the cancer or the deaths beat me that day, that they were stronger than me. I feared what it would mean to me to let go.</p>
+<p>I got through these four years and kept writing, but I paid a price. When I read the earlier chapters, they have a whimsy and light-heartedness that later chapters lack. We&#x27;re all going through dark times, and I don&#x27;t <em>feel</em> light. The past few years left a mark on me, and that mark shows up in the book. I miss the goofier person I used to be, sometimes. But I&#x27;d like to believe that maybe the person I am now is a little more honest. Maybe some of those jokes were a mask.</p>
+<p>And, thankfully, Mom is in remission.</p>
+<p>Psychological self examination aside, I did keep up the writing. Which is good because, <em>man</em> did I underestimate this book. I was aiming for 60,000 words and hoped to get it done in about a year. Here I am four years later sitting on a quarter of a million words.</p>
+<p>People sometimes ask what it&#x27;s like writing something that big. I&#x27;ve been asking myself that for the past couple of weeks. And the weird thing is, <em>I don&#x27;t know.</em> I&#x27;ve had my head down for the past four years and haven&#x27;t looked past the next paragraph or two the entire time. What does it feel like to write an email or draw a picture? Writing the book felt like that. I just happened to do it over and over again. I feel like a marathon runner who&#x27;s been watching his feet the whole time and didn&#x27;t even notice when he stumbled over the finish line.</p>
+<h2>Now what?</h2>
+<p><em>Crafting Interpreters</em> is complete now. I had to stop here for a minute and look at that sentence. I&#x27;ve been working on this book every day for around 1,400 days. I can&#x27;t <em>wait</em> to take a break. So that&#x27;s the next step. My plan was to finish the book right before spring break and enjoy a week on the beach with family.</p>
+<p>That beach trip went the way of so many other plans in early 2020, but I still intend to take a long break. I don&#x27;t know if you noticed, but we all have a lot of other shit to deal with right now. I&#x27;m going to relax.</p>
+<p>Every morning since 2016, I&#x27;ve woken up with a task I had to do. Until I got my writing done for the day, it was on my mind, weighing me down. Writing left me drained. If you&#x27;ve ever had a newborn, you know the feeling of always having to carry the baby around. After a while, it&#x27;s like you forget what it&#x27;s like to have <em>two</em> free arms. I&#x27;ve been carrying this baby for four years, so I&#x27;m looking forward to having both arms for a while.</p>
+<p>Once I&#x27;m recharged, the real fun starts. Having the book online is important, but for me, <em>Crafting Interpreters</em> was always meant to be a <em>book</em> with pages and a cover. So after a long bout of editing and bug fixing, I&#x27;m going to get started doing the page layout for the print edition. I love graphic design, and I can&#x27;t wait to hold it in my hands.</p>
+<p>If you&#x27;d like to hold it in <em>your</em> hands when it comes out, I have [a mailing list][list</p>
+<p>] where I&#x27;ll let you know when the book is done. In the meantime, I think I&#x27;ve earned some rest.</p>
+<p>[list]: https://mailchi.mp/afd054e73140/robertnystrom </p>

@@ -1,0 +1,93 @@
+<p>This is mainly a note for my future self, but making it a blog post in case it helps anyone else. This weekend, I decided to try making a little SDL3 app on my new M4 MacBook Pro. It took me a few hours to figure out how to get XCode to play nice with the SDL3 framework given MacOS&#x27;s paranoia around unsigned code and malware.</p>
+<p>Here&#x27;s the summary for anyone whose Google searching takes them here. The instructions are fairly similar to [the SDL3 README for MacOS][readme by hand</p>
+<p>]:</p>
+<p>[readme by hand]: https://wiki.libsdl.org/SDL3/README-macos#setting-up-a-new-project-by-hand</p>
+<p>1.  Start up XCode. Choose &quot;File &gt; New &gt; Project...&quot;.</p>
+<p>2.  Select &quot;macOS&quot;, then under &quot;Application&quot; choose &quot;App&quot;. <em>This step is     important. Choosing &quot;Command Line Tool&quot; will <strong>not</strong> work.</em> Click &quot;Next&quot;.</p>
+<p>3.  Give your app a name. For &quot;Interface&quot;, choose &quot;XIB&quot;. For &quot;Language&quot;, choose     &quot;Objective-C&quot;. Click &quot;Next&quot;. Choose a place to save your project.</p>
+<p>Now you have a vanilla &quot;Hello World&quot; Mac app. The next step is integrating SDL:</p>
+<p>1.  Download [a release][releases</p>
+<p>] of SDL. As I&#x27;m writing this, the latest is     3.2.16. Download the corresponding <code>.dmg</code> file. Open it in Finder.</p>
+<p>2.  Open <code>SDL3.xcframework/macos-arm64_x86_64</code> and copy <code>SDL3.framework</code> from     there to somewhere in your XCode project&#x27;s source tree. (I made a <code>lib</code>     folder and put it there in mine.)</p>
+<p>3.  In XCode, in the file explorer on the left, click the top project icon to     open the settings for it. In the main panel on the right, click the icon     for your app target under &quot;Targets&quot; to open the target settings.</p>
+<p>4.  Under &quot;Frameworks, Libraries, and Embedded Content&quot;, click the &quot;+&quot; to add a     new framework. In the popup that appears, click &quot;Add Other... &gt; Add     Files...&quot;. Navigate to wherever you copied &quot;SDL3.framework&quot; and choose it.</p>
+<p>[releases]: https://github.com/libsdl-org/SDL/releases</p>
+<p>Then let&#x27;s use SDL and verify everything is working.</p>
+<p>1.  In <code>main.m</code>, comment out the entire <code>main()</code> function.</p>
+<p>2.  Make a new <code>main.c</code> file and copy the contents of [hello.c][hello.c</p>
+<p>] from     the SDL docs into it.</p>
+<p>3.  Compile and run.</p>
+<p>[hello.c]: https://github.com/libsdl-org/SDL/blob/main/docs/hello.c</p>
+<p>If that all works, you should see a delightful pixelated &quot;Hello World!&quot; fill your screen. Press any key to quit.</p>
+<p>Let&#x27;s make sure the full iteration loop works. (Read below to see why I feel the need to verify this.):</p>
+<p>1.  In <code>main.c</code> inside <code>SDL_AppIterate()</code>, change the message string.</p>
+<p>2.  Hit Command-R to run. You should see your updated message on screen.</p>
+<p>There you go, you now have a working shell of a Mac app with using a local install of SDL3. You can probably delete the <code>main.m</code> file entirely and maybe some of the other generated files that XCode put in the new project, but I haven&#x27;t figured that out yet.</p>
+<p>Now here&#x27;s all the wrong stuff I tried first before I got that working...</p>
+<h2>Attempt 1: Download a release and use the xcframework</h2>
+<p>In XCode, I created a new &quot;CLI Command&quot; C app. That got me a &quot;Hello, world!&quot; up and running without any problems. Then I copied the contents of [this SDL hello example][hello</p>
+<p>] into my source file.</p>
+<p>As expected, that failed to compile because it couldn&#x27;t find <code>SDL3/SDL.h</code>. So next is getting SDL linked in.</p>
+<p>[hello]: https://github.com/libsdl-org/SDL/blob/main/docs/hello.c</p>
+<p>The first thing I did was download [the 3.2.16 stable release installer][installer</p>
+<p>]. I downloaded the DMG file and opened that. Then following the instructions, I dragged the entire <code>SDL3.xcframework</code> directory into the XCode project.</p>
+<p>[installer]: https://github.com/libsdl-org/SDL/releases/tag/release-3.2.16</p>
+<p>That correctly added a reference to the Framework and got XCode to a point where it could resolve the include and compile the program. Great.</p>
+<p>But when I ran it, it failed at startup. The OS tried to dynamically load the SDL3 framework, but then balked because it thinks the framework isn&#x27;t correctly signed and safe to use. The OS gave me a popup error with &quot;SDL3.framework Not Opened&quot; because &quot;macOS cannot verify that this app is free from malware&quot;.</p>
+<p>Crap.</p>
+<h2>Attempt 2: Embed the framework</h2>
+<p>Poking around online, some people say this error can be fixed by embedding the SDL framework in my app and having XCode sign it when it embeds it. In XCode, in the target settings under &quot;Build Phases&quot;, there is a panel for &quot;Embed Frameworks&quot;. I dragged <code>SDL3.xcframework</code> under there and checked &quot;Code Sign On Copy&quot;.</p>
+<p>Alas, when I tried to compile, now I got a build error. It complained that two tasks in the build were trying to produce the same file. I&#x27;ve lost the exact error message but it looked like one of the tasks was a simple file copy and the other was a &quot;ProcessXCFramework&quot; invocation. I&#x27;m guessing the latter is the task that signs and embeds the framework.</p>
+<p>I tried basically every combination of build settings to try to fix this: removing the framework from &quot;Link Binary with Libraries&quot;, checking &quot;Copy only when installing&quot;, and a bunch of other things I don&#x27;t remember. Nothing worked. Either I removed so much that the compiler couldn&#x27;t find the framework at all, or it got the duplicate build file error.</p>
+<h2>Attempt 3: Don&#x27;t use the entire &quot;SDL3.xcframework&quot;</h2>
+<p>I started watching [this video][video</p>
+<p>] to see if it could help. He doesn&#x27;t use the entire <code>SDL3.xcframework</code> bundle. Instead, he opens that, goes into <code>macos-arm64_x86_64</code> and copies the <code>SDL3.framework</code> framework out of there.</p>
+<p>[video]: https://www.youtube.com/watch?v=tRqgh8Xwe1E</p>
+<p>I removed <code>SDL3.xcframework</code> from my XCode project and dragged <code>SDL3.framework</code> into it instead. That gave me something that compiled, but when I tried to run, it failed at load time with:</p>
+<pre><code>dyld[15605]: Library not loaded: @rpath/SDL3.framework/Versions/A/SDL3
+Referenced from: &lt;...&gt; /Users/...
+Reason: tried: &#x27;/Users/.../Build/Products/Debug/SDL3.framework/
+Versions/A/SDL3&#x27; (no such file)</code></pre>
+<p>In the target settings, I again added the framework (but this time <code>SDL3.framework</code> not <code>SDL3.xcframework</code> to &quot;Embed frameworks&quot;). For reasons that are entirely unclear to me, that worked. I hit Command-R and...</p>
+<p>&lt;figure&gt;   &lt;img class=&quot;framed&quot; src=&quot;/image/2025/07/hello.gif&quot;&gt;   &lt;figcaption&gt;Hallelujah.&lt;/figcaption&gt; &lt;/figure&gt;</p>
+<p>All done, right? Not so fast. I made a tiny tweak to the code and tried to run it again. The compile immediately failed with:</p>
+<pre><code>&#x27;SDL3/SDL.h&#x27; file not found</code></pre>
+<p>What? I literally just compiled and ran it. Just to make sure I wasn&#x27;t crazy, I cleaned the build directory and compiled again. That worked! &quot;Hello World!&quot; popped up on screen again.</p>
+<p>Build again... same error.</p>
+<p>Clean build and then build. Works!</p>
+<p>So I can build <em>once</em> but then something in the build directly causes any subsequent compile to fail. The full error is:</p>
+<pre><code>Did not find header &#x27;SDL.h&#x27; in framework &#x27;SDL3&#x27; (loaded from
+  &#x27;/Users/.../Index.noindex/Build/Products/Debug&#x27;)</code></pre>
+<p>So what I <em>think</em> is happening is that in the first clean build, it locates the framework inside my app&#x27;s main directory. That framework does have the headers so the compiler can find what it needs.</p>
+<p>Then after that first build, the compiler starts using the framework that it copied into the build directory. But when I look in there, <code>Debug</code> is completely empty.</p>
+<h2>Attempt 4: Project-relative DerivedData</h2>
+<p>I hate when tools stuff built data in random system directories unrelated to the project I&#x27;m working on because those files end up sitting around forever. So the next thing I did was go under &quot;Project Settings&quot; and changed the &quot;Derived Data&quot; to be &quot;Project-relative Location&quot;.</p>
+<p>I cleaned and built successfully. But, again, if I made a trivial code change and tried to build again, it failed. This time, though, there was actually something in <code>DerivedData/my_app/Build/Products/Debug/</code>.</p>
+<p>I can see an <code>SDL3.framework</code> directory under there. It contains <code>Versions/A/SDL3</code> (and some other stuff). So the library is there as expected. But there is no <code>Headers</code> directory under <code>Versions/A/</code>, nor is there a <code>Headers</code> symlink in <code>SDL3.framework</code> pointing to it.</p>
+<p>In theory, that&#x27;s fine. In the compiled app, all that&#x27;s needed is the library itself. But for reasons I don&#x27;t understand, XCode is trying to use this semi-copied version of the framework for subsequent compiles instead of the original one in my project&#x27;s source tree.</p>
+<h2>Attempt 5: Explicit header search path</h2>
+<p>OK, if XCode can&#x27;t find the headers because it&#x27;s looking in the wrong place, maybe I can just tell it where to look. Under &quot;Search Paths&quot;, I added <code>lib/SDL3.framework/Headers</code> to &quot;Header Search Paths&quot;. (I put the framework under <code>lib</code> in my project tree, hence the <code>lib/</code> part.) Didn&#x27;t help. Tried making it recursive. Nope.</p>
+<p>Maybe just <code>lib/SDL3.framework</code>? No.</p>
+<p>I&#x27;m guessing the problem here is that the include paths look like <code>SDL3/SDL.h</code>, not just <code>SDL.h</code>, so I need to get XCode to understand that the headers are inside a framework to resolve the <code>SDL3/</code> part.</p>
+<h2>Attempt 6: Framework search path</h2>
+<p>OK, so maybe it&#x27;s not a header search path. Instead, I tried adding <code>lib/</code> to &quot;Framework Search Paths&quot;. No help. Making it recursive didn&#x27;t help. Neither did <code>lib/SDL3.framework</code>.</p>
+<p>I do a bunch of Googling and eventually stumble onto [this old StackOverflow post][so</p>
+<p>]. He specifically mentions only getting the error after the first build, so this is my exact issue. And the author apparently found a solution!</p>
+<p>[so]: https://stackoverflow.com/questions/63630876/xcode-cant-find-the-header-path-after-build/63668035</p>
+<p>...which they described only as &quot;It works know after certain changes!&quot;. So helpful.</p>
+<p>I eventually found [this Apple Developer forum thread][apple dev</p>
+<p>], which also sounds like my problem.</p>
+<p>[apple dev]: https://developer.apple.com/forums/thread/750074</p>
+<h2>Attempt 7: An App instead of a CLI Command</h2>
+<p>The forum thread suggests that the issue may have something to do with creating a &quot;CLI Command&quot; instead of an &quot;App&quot;. I&#x27;ve always done the former in XCode because that seemed like the simplest way to get a vanilla C/C++ app up and running. In older versions of XCode/macOS, it worked fine. But maybe it doesn&#x27;t play nice with frameworks in later versions?</p>
+<p>I trash the entire XCode project and create a new one. This time I choose &quot;App&quot; instead of &quot;CLI Command&quot;. I set the language to &quot;Objective-C&quot; (because that&#x27;s the &quot;closest&quot; to C, I guess -- I&#x27;m winging it here). I set &quot;Interface&quot; to &quot;XIB&quot; based on [this README][macos readme</p>
+<p>].</p>
+<p>[macos readme]: https://wiki.libsdl.org/SDL3/README-macos</p>
+<p>I run it and get an empty window, the &quot;Hello World&quot; of GUI apps. OK.</p>
+<p>I copy <code>SDL3.framework</code> out of <code>SDL3.xcframework/macos-arm64_x86-x64</code> into <code>lib/</code> in my new app&#x27;s source tree. Then in XCode, in the &quot;General&quot; tab of the main target, under &quot;Frameworks, Libraries, and Embedded Content&quot;, I click the &quot;+&quot;. From there I choose &quot;Add Other...&quot;, &quot;Add Files...&quot;, and add <code>lib/SDL3.framework</code>.</p>
+<p>I admit to feeling a moment of anticipation. Will this actually work?</p>
+<p>I make a new <code>.c</code> file and paste in the <code>hello.c</code> SDL3 example code. I comment out <code>main()</code> in the <code>main.m</code> that XCode generated. Compile and... it runs! I&#x27;ve got an SDL3 &quot;Hello World!&quot; on screen again.</p>
+<p>Now the real test... can I make a change and build again?</p>
+<p>Yes! It works! <em>Finally!</em></p>
+<p>As far as I can tell, I am up and running now. I didn&#x27;t have to add SDL3 to my system framework path. (I didn&#x27;t want to do that because ultimately, I want an app that users can just run without having to install SDL themselves.)</p>
+<p>So it looks like the failure mode was creating a &quot;CLI Command&quot; instead of an &quot;App&quot;. How on <em>Earth</em> would I be expected to know that? </p>

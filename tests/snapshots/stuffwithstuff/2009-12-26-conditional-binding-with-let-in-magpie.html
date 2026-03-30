@@ -1,0 +1,63 @@
+<p>Magpie, as an imperative language, has the usual control flow structures you expect to see: <code>while</code>, <code>if</code>, and <code>for</code> (although they&#x27;re a little different from their C counterparts). However, Magpie has one other control flow construct you probably haven&#x27;t seen before: <code>let then</code>, the conditional binder.</p>
+<h2>A motivating example or two</h2>
+<p>Before I explain it, let&#x27;s go over a couple of examples in other languages where it would be useful. First up: converting strings to other types. In C#, you&#x27;d do something like:</p>
+<pre class="csharp"><code>int value = Int32.Parse(&quot;1234&quot;);
+// Do something with value...</code></pre>
+<p>That&#x27;s fine and dandy except that the parse can fail and throw an exception. If you don&#x27;t want to deal with the exception, the easier solution is to use the conveniently provided <code>TryParse</code> function:</p>
+<pre class="csharp"><code>int value;
+if (Int32.TryParse(&quot;1234&quot;, out value))
+{
+    // Do something with value...
+
+}</code></pre>
+<p>That&#x27;s the idiomatic way to convert strings to ints in C#. Aside from the cumbersome out parameter, what&#x27;s lame about this code is that <code>value</code> is scoped <em>outside</em> of the <code>if</code> block where we actually want to use it. If the conversion fails, we have this weird unassigned <code>value</code> variable floating around.</p>
+<p>Here&#x27;s another example: downcasting. Let&#x27;s say we have a variable of type <code>Base</code> and we want to downcast it to a <code>Derived</code> subclass. The normal way to do that is:</p>
+<pre class="csharp"><code>Derived derived = someBase as Derived;
+if (derived != null)
+{
+    // Do something with derived...
+}</code></pre>
+<p>A third and final example: looking up a value in a dictionary. If you aren&#x27;t sure the key exists, the typical solution is:</p>
+<pre class="csharp"><code>Dictionary&lt;string, int&gt; dict = // Get dictionary...
+
+int value;
+if (dict.TryGetValue(&quot;key&quot;, out value))
+{
+    // Do something with value...
+}</code></pre>
+<p>You&#x27;re seeing the pattern by now. All of these have the exact same structure. We have some operation that may return a value or may fail for some reason. If it succeeds, we want to do something with the returned value.</p>
+<h2>Let</h2>
+<p>The <code>let</code> keyword in Magpie lets you implement that pattern directly, without the gross scoping issues or output parameters. The above examples in Magpie look like this:</p>
+<pre class="magpie1"><code>// Parse:
+let value &lt;- &quot;1234&quot;.AsInt then
+    // Do something with value...
+end
+
+// Downcast:
+let derived &lt;- someBase.As&#x27;Derived then
+    // Do something with derived...
+end
+
+// Look up in dictionary:
+let value &lt;- Find (dict, &quot;key&quot;) then
+    // Do something with value.
+end</code></pre>
+<p>The way this works is pretty simple. Magpie has an <code>Option</code> type, which is the same as F#&#x27;s [option][</p>
+<p>] or Haskell&#x27;s [Maybe][</p>
+<p>]. A <code>let</code> expression looks like:</p>
+<p>[option]: http://msdn.microsoft.com/en-us/library/dd233245%28VS.100%29.aspx [maybe</p>
+<p>]: http://en.wikibooks.org/wiki/Haskell/Hierarchical_libraries/Maybe</p>
+<pre class="magpie1"><code>let &lt;variable&gt; &lt;- &lt;expression&gt; then &lt;body&gt;</code></pre>
+<p>The <code>&lt;expression&gt;</code> is expected to return an <code>Option</code> value. If it evaluates to <code>Some</code>, then the value is extracted and assigned to <code>&lt;variable&gt;</code> and the <code>&lt;body&gt;</code> is evaluated. If <code>None</code> is returned instead, the variable isn&#x27;t bound and the body is skipped. Pretty straightforward.</p>
+<p>What&#x27;s nice about this syntax is that the bound variable is scoped to the body of the <code>let</code> expression and disappears afterwards. This means that if the expression fails and returns <code>None</code>, the variable disappears entirely. It&#x27;s syntactically impossible to access that variable when it has no value.</p>
+<h2>What else?</h2>
+<p>Because <code>let</code> is essentially another kind of <code>if</code>, it also supports an <code>else</code> clause:</p>
+<pre class="magpie1"><code>// Parse:
+let value &lt;- &quot;1234&quot;.AsInt then
+    // Do something with value...
+else
+    Print &quot;Couldn&#x27;t parse string.&quot;
+end</code></pre>
+<h2>A bit on naming</h2>
+<p>I probably spend more time than I should thinking about the minutia of language syntax. I chose <code>let</code> because to me that implies <em>permission</em>: it <em>may</em> &quot;let&quot; you do something or it may not, which lines up with the conditional nature of the construct. Using <code>then</code> to separate the expression from the body both reinforces that this is an &quot;if-like&quot; conditional block and lets me reuse an existing keyword.</p>
+<p>Of course, programmers of the ML-family will likely recognize <code>let</code> as a poor man&#x27;s pattern matching. This isn&#x27;t far from the truth, but I do think Magpie&#x27;s &quot;light&quot; version is kind of nice in its own regard. </p>

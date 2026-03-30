@@ -1,0 +1,250 @@
+<p>By all rights, I should love [Go][</p>
+<p>]. I like low-level languages. I&#x27;m comfortable in C and have written memory managers for fun. I hate the boilerplate of Java and the compile times of C++. I like closures and garbage collection. I think locks and semaphores aren&#x27;t the right way to do concurrency, and I really dig [coroutines][</p>
+<p>].</p>
+<p>[go]: http://golang.org/ [coroutines</p>
+<p>]: /2010/07/13/fibers-coroutines-in-finch/</p>
+<p>Despite all of that, though, I&#x27;ve failed to warm to the language. I thought it might be useful (for me at least) to try to clarify why Go isn&#x27;t the language I wish it was. The most constructive way I could think of to do that is to describe that hypothetical future Go and why I think it would be an improvement.</p>
+<p>Much of this is based on my understanding of what Go is today. If I get stuff wrong, let me know.</p>
+<p><strong>TL;DR: This post ended up way longer than I expected. Super science summary: I wish Go had tuples, unions, constructors, no Nil, exceptions, generics, some syntax sugar, and ponies that shoot Cheez Whiz out of their noses.</strong></p>
+<h2>Syntax</h2>
+<p>Go&#x27;s current syntax is a streamlined version of C, sort of like Danny DeVito with elevator shoes. Let&#x27;s aim a little higher. Smalltalk, Python, and Ruby have all given us a slew of good ideas we can learn from to make a language more expressive and readable. Here&#x27;s a few I&#x27;d really like:</p>
+<h3>Named/keyword arguments</h3>
+<p>Positional arguments are great for terseness, and when a function takes arguments of different types, errors with them are rare. However, once a function starts taking more than two or three arguments or takes arguments of the same type, errors become common. Quick, does <code>substring</code> take a length or an ending index? Does <code>find</code> take <code>needle, haystack</code> or <code>haystack, needle</code>?</p>
+<p>Named or keyword arguments solve that. Smalltalk uses them for <em>all</em> multi-argument methods, but I think that&#x27;s going a bit too far. One simple bit of syntactic sugar would be to allow a function call like:</p>
+<pre class="go"><code>substring(from: start, to: end)</code></pre>
+<p>To be translated by the parser into:</p>
+<pre class="go"><code>substring__from__to(start, end)</code></pre>
+<p>This would also give you a primitive form of overloading:</p>
+<pre class="go"><code>substring(from: start, to: end)
+substring(from: start, length: end)
+substring(from: start)</code></pre>
+<p>These function calls would all desugar to distinct long function names, so even though they&#x27;re all <code>substring</code>, there&#x27;s no overloading or name collision. Overloading like this also covers default arguments: simply provide an overload with some keywords missing that then forwards to the longer version, passing in the missing argument.</p>
+<h3>Block arguments</h3>
+<p>A lot of behavior comes in pairs: you open a file, then close it. You start a transaction, then commit it. You lock, then unlock. In between the pairs, a chunk of code is performed. This can be done manually, like:</p>
+<pre class="go"><code>file := os.Open(filename)
+fmt.println(file.Read())
+file.Close()</code></pre>
+<p>But then you have to ensure you don&#x27;t forget to close it. Go&#x27;s <code>defer</code> gives you a little help here, but you still have to <em>remember</em> to <code>defer</code> each call. In C++, [RAII][</p>
+<p>] is the solution, but I&#x27;m particularly fond of how [Ruby][block</p>
+<p>] solves this. We can solve the &quot;forgetting to close&quot; problem in Go today by defining a function like this:</p>
+<p>[raii]: http://en.wikipedia.org/wiki/Resource_Acquisition_Is_Initialization [block</p>
+<p>]: https://www.rubyguides.com/2016/02/ruby-procs-and-lambdas/</p>
+<pre class="go"><code>func ReadFile(filename string, block func(f *File)) {
+  file := os.Open(filename)
+  block(file)
+  file.Close()
+}</code></pre>
+<p>Now when you need to read from a file, you just do:</p>
+<pre class="go"><code>ReadFile(filename, func(file) {
+  fmt.println(file.Read())
+})</code></pre>
+<p>Now you&#x27;re safely guaranteed to close the file when the operation is done. This works because Go has lexical closures, a really nice feature. But the syntax for this is ungainly. Ruby addresses this with block arguments. Translated to Go, they could look something like:</p>
+<pre class="go"><code>ReadFile(filename) do(file) {
+  fmt.println(file.Read())
+}</code></pre>
+<p>The block after <code>do</code> would be wrapped in a closure and passed to the preceding function as a subsequent argument. (In other words, it desugars to exactly the previous example.) This would, I think, give you a really simple basis for defining scoped behavior without having to go down the route of destructors or more complicated context management like Python&#x27;s <code>with</code>.</p>
+<h3>Operator overloading</h3>
+<p>I understand this is a religious issue for some people. Apparently, there is a cadre of truly evil programmers out there overloading operators to do malicious subversive things and good-hearted God-fearing coders are getting harmed by this every day.</p>
+<p>Somehow I&#x27;ve dodged that bullet. The cases where I&#x27;ve seen operator overloading used have been easy to understand and valid: vectors, matrices, complex numbers, arbitrary-precision numbers. Those, to me, sound like the exact kind of data structures a systems language like Go would use frequently. Being able to define operators that do what you expect on them would be nice. Call me crazy, but I prefer:</p>
+<pre class="go"><code>position := origin + offset + orientation * speed</code></pre>
+<p>over:</p>
+<pre class="go"><code>position := Add(Add(origin, offset), Multiply(orientation, speed))</code></pre>
+<h2>The type system</h2>
+<p>Go has two really neat type system features: implicitly implemented interfaces and a flat type hierarchy. There are two other simple additions I&#x27;d dig: tuples and unions.</p>
+<h3>Tuples</h3>
+<p>Go already has multiple returns, so the utility of [tuples][</p>
+<p>] -- ad-hoc data structures for bundling a couple of values together -- is clearly appreciated. Making tuples a first-class part of the type system would make multiple returns feel less special and eliminate some corner cases of the language.</p>
+<p>[tuples]: http://en.wikipedia.org/wiki/Tuple</p>
+<p>Here&#x27;s an example of what I&#x27;m talking about: Let&#x27;s say you have some generator function that&#x27;s returning values. You take those returns and put them in a container (which just stores them as <code>interface{}</code>). Later, you pull those out.</p>
+<p>As it currently stands, that only works with generators that have a single return. If tuples were first class, that would allow multiple returning functions without any problems. With generics, this becomes an even more useful property: generic functions can work with single or multiple arguments without needing [a slew of overloads for arity][arity</p>
+<p>].</p>
+<p>[arity]: https://docs.microsoft.com/en-us/dotnet/api/system.func-17?view=net-5.0</p>
+<p>In other words, instead of <code>,</code> being a special <em>syntactic</em> feature of certain statement types (<code>return</code>, <code>var</code>, and <code>:=</code>), it would become an <em>expression</em> that creates composite values.</p>
+<p>The syntax would be simple: a comma creates a tuple:</p>
+<pre class="go"><code>point := 1, 2          // Create a tuple of two ints.
+doSomething(true, &quot;s&quot;) // Pass a tuple to a function.
+return value, err      // Return a tuple.</code></pre>
+<p>Multiple assignment could be used to pull fields out of a tuple:</p>
+<pre class="go"><code>x, y := point</code></pre>
+<h3>Unions</h3>
+<p>Unions are the other compound type made famous by the ML family of languages. Where a tuple says &quot;this value is an X <em>and</em> a Y&quot;, a union says, &quot;this value is an X <em>or</em> a Y&quot;. They&#x27;re useful anywhere you want to have a value that&#x27;s one of a few different possible types.</p>
+<p>One use case that would fit well in Go is error codes. Many functions in Go return a value on success or an error code on failure using a multiple return. The problem there is that if there is an error, the other value that gets returned is bogus. Using a union would let you explicitly declare that the function returns a value <em>or</em> an error but not both.</p>
+<p>In return, the caller specifically has to check which case was returned before they can use the value. This ensures that errors cannot be ignored.</p>
+<p>There are two flavors of unions in other languages. Ad-hoc unions as used in [Pike][</p>
+<p>], [Typed Scheme][</p>
+<p>], and the [Closure Javascript Compiler][closure</p>
+<p>] don&#x27;t attach labels to each case. The more familiar [sum types][</p>
+<p>] of ML, Haskell, and F# do. Both have their advantages. I think tagged unions are less useful in Go since interfaces cover some of that use case.</p>
+<p>[pike]: http://pike.ida.liu.se/generated/manual/ref/chapter_3.html#4 [typed scheme</p>
+<p>]: https://docs.racket-lang.org/ts-guide/types.html#%28part.<em>.Union</em>.Types%29 [closure]: https://developers.google.com/closure/compiler/?csw=1 [sum types</p>
+<p>]: http://en.wikipedia.org/wiki/Sum_type</p>
+<p>Here&#x27;s an example of what ad-hoc unions could look like in Go. Let&#x27;s say we want to write a function that parses strings into numbers. It returns an <code>int</code> on success, but may also fail. Using a union, you could define that like:</p>
+<pre class="go"><code>func ParseInt(text string) int | *Error {
+  // Code to parse...
+  if success {
+    return value;
+  } else {
+    return ParseError(&quot;Could not parse string.&quot;)
+  }
+}</code></pre>
+<p>Note the <code>|</code> in the return type declaration and that the two <code>return</code> statements return different types. A caller would then determine if it was successful using a type test. The syntax could be improved, but something not too far from what Go has now could look like:</p>
+<pre class="go"><code>parsed := ParseInt(&quot;123&quot;)
+switch parsed {
+case int as i:
+  // Here, i is the parsed int value.
+case *Error as err:
+  // Here, err is the error.
+}</code></pre>
+<p>This is more type-safe that it may at first appear. It&#x27;s important to note that the type of <code>parsed</code> is <em>not</em> <code>int</code>, it&#x27;s <code>int | *Error</code>. That means that trying to ignore the error and treat the value returned from <code>ParseInt</code> like a number by doing something like <code>parsed + 1</code> will be a <em>compile</em> error. This lets us statically ensure that errors are not ignored, which I think meshes nicely with Go&#x27;s &quot;explicit is better&quot; philosophy.</p>
+<p>The other thing I like about this is that we&#x27;ve avoided returning some meaningless int value on failure. If there is an error, there won&#x27;t be an <code>int</code> value at all, and we won&#x27;t create a variable for it.</p>
+<p>That&#x27;s marginally useful for numbers, but for functions that may return a complex initialized object or an error, it&#x27;s nice not having to build some zombie zero-initialized struct that shouldn&#x27;t be used anyway. This is a good segue into the next section...</p>
+<h2>Initialization</h2>
+<p>A big part of the appeal of static languages is that they can help us avoid errors. One common source of errors is improperly initialized values.</p>
+<p>There&#x27;s two species of initialization bugs that get lumped together. The first is <em>completely</em> uninitialized values: a value is yanked out of the primordial byte soup without setting a single bit. You have no idea what state it&#x27;s in. These bugs exist in C, to a lesser extent C++, and not at all in almost all other languages.</p>
+<p>The other species more common today is a value that&#x27;s initialized to a well-defined but useless state. This includes things like member variables that are <code>null</code> but shouldn&#x27;t be in Java, causing NullPointerExceptions later, strings that shouldn&#x27;t be empty, etc. Anything where an object&#x27;s state doesn&#x27;t meet the invariants that it requires to function properly.</p>
+<p>Go, designed to be an improvement on C, eradicates the first species but not the second. I&#x27;d like to go further than that. One of the things I love about static languages is their ability to ensure at compile time that certain kinds of errors are not present. Initialization bugs are a big class of errors we can fix. There are a couple of ideas we can learn from other languages to help here.</p>
+<h3>Constructors</h3>
+<p>Constructors are the obvious one. If you want to ensure your objects are in some known state, having a function that puts it in that state is a good way to go about it. Of course, you can write initialization functions in any language, including C, but the clever part about constructors is that a new object <em>must</em> go through one. Constructors are the gatekeeper for an object&#x27;s state.</p>
+<p>Any C++ user can tell you that constructors are fairly complex, but the success of C++, Java, and C# also tells us that it isn&#x27;t intractably so. A minimal proposal for constructors is something like this:</p>
+<p>A function declared in the same package as a type with the same name as the type defines a constructor function. Structs can be created by value by calling the function directly:</p>
+<pre class="go"><code>pt := Point(2, 3);</code></pre>
+<p>Or they can be created by on the heap using <code>new</code>:</p>
+<pre class="go"><code>pt := new Point(2, 3);</code></pre>
+<p>If a struct has no constructors, it implicitly gets a default one. If it has one or more constructor functions, then any creation must go through one of those.</p>
+<p>A constructor&#x27;s primary responsibility is to initialize all of the fields of the struct. It is a static error to access a field in a constructor before it&#x27;s been assigned, and also a static error to fail to assign to all fields by the end of the method body.</p>
+<p>That&#x27;s obviously a pretty rough proposal but it&#x27;s in the shape of something that I think would help make for safer code.</p>
+<h3>Eliminating nil</h3>
+<p>Once you have constructors and you can statically ensure that every variable has a chance at initialization, you can start to escape one of the [most unfortunate language misfeatures][billion</p>
+<p>] in wide use today: <code>null</code>. Following in the footsteps of C++ and others, Go allows any pointer or reference to refer to a value or to also potentially be <code>nil</code>.</p>
+<p>[billion]: http://lambda-the-ultimate.org/node/3186</p>
+<p>If your function expects a <code>*Foo</code>, you may get a pointer to a Foo, or you may get <code>nil</code>. It&#x27;s up to you to check for it at runtime, everywhere, all the time. Fail to do so, and you run the risk of your program crashing on a null pointer.</p>
+<p>Languages in the ML family don&#x27;t have this problem. There, if a function takes a Foo, you will always get a Foo, no matter what. The bit of special sauce to enable that is that you must ensure that all variables are initialized. That way, you can&#x27;t create a variable of type <code>*Foo</code> without actually initializing it with a pointer to a Foo.</p>
+<p>If we add constructors, we&#x27;ll have the opportunity to do that initialization, and an entire class of painfully common bugs disappears.</p>
+<h2>Error-handling</h2>
+<p>Go has two strategies for error-handling: return codes and <code>panic</code>. I like returning error codes for cases where errors can be expected to happen frequently in the course of normal execution -- things like parsing strings or looking up items in a collection.</p>
+<p>For most other operations, I&#x27;ve found exceptions to be more manageable than error codes. Automatically unwinding the stack until you reach code that&#x27;s ready to handle the error is just the kind of deeply brilliant behavior that I think is a good fit for Go&#x27;s philosophy of a small number of open-ended features.</p>
+<p>While they may not realize it, I think the Go designers actually agree with me. Consider this code from [the article linked to][panic</p>
+<p>] on [why Go doesn&#x27;t have exceptions][exceptions</p>
+<p>]:</p>
+<p>[panic]: https://go.dev/blog/defer-panic-and-recover [exceptions</p>
+<p>]: https://golang.org/doc/faq#exceptions</p>
+<pre class="go"><code>func CopyFile(dstName, srcName string) (written int64, err os.Error) {
+  src, err := os.Open(srcName, os.O_RDONLY, 0)
+  if err != nil {
+    return
+  }
+  defer src.Close()
+
+  dst, err := os.Open(dstName, os.O_WRONLY|os.O_CREATE, 0644)
+  if err != nil {
+    return
+  }
+  defer dst.Close()
+
+  return io.Copy(dst, src)
+}</code></pre>
+<p>Those two <code>if err != nil</code> blocks are exactly what exceptions do for you, automatically and gracefully. Another example: every place I could find in the [JSON decoder][json</p>
+<p>] that looks at an error code immediately unwinds the stack by returning an error code in turn or panicking.</p>
+<p>[json]: http://golang.org/src/pkg/json/decode.go</p>
+<p>I&#x27;ve seen a lot of heated debates between Go fans and haters about how exceptions are the best or worst thing ever, but scant actual elucidation as to <em>why</em>. For what it&#x27;s worth, here&#x27;s my take. In addition to the aforementioned automatic stack-unwinding, there&#x27;s two other things I like about exceptions:</p>
+<h3>No zombie variables</h3>
+<p>My favorite aspect of exceptions is that they can, just by the shape of the code, prevent you from doing something incorrect. Consider this:</p>
+<pre class="java"><code>try {
+  File file = openFile(filename);
+  file.read();
+} catch (RuntimeException ex) {
+  System.out.println(&quot;Oh noes!&quot;);
+}</code></pre>
+<p>What exceptions give you here is the absolute guarantee that <code>file</code> will <em>never</em> hold anything except the value of a <em>successful</em> return from <code>openFile</code>. You don&#x27;t have to check an error code. You don&#x27;t have to check if it&#x27;s <code>null</code>. If you make it to the <code>file.read()</code>, you know you have a valid file. In other words, we get to use blocks to limit the scope of variables to only exist when it&#x27;s <em>correct</em> for them to do so.</p>
+<h3>Type safety without coupling</h3>
+<p>There&#x27;s another nice feature of exceptions, but it&#x27;s a bit elaborate to explain. Let&#x27;s say I&#x27;m passing an object of a type I defined to some third-party library, which then calls a method on the object. So the callstack looks something like:</p>
+<pre class="text"><code>1: MyObject::doSomething()
+2: ThirdPartyLib::callMyObject()
+3: MyCode::passObjectToLib()
+4: main()</code></pre>
+<p>Now let&#x27;s say that <code>doSomething()</code> method fails and throws an exception of type <code>MyException</code>, which I catch in <code>passObjectToLib()</code>. The third-party library has <em>no awareness of that type at all</em>. What&#x27;s cool about exceptions is that this works just fine: I can catch my own exception type with complete type safety even though it unwinds the callstack <em>through</em> a layer that&#x27;s completely oblivious to that type.</p>
+<p>If you try to do the same thing with error codes where <code>callMyObject()</code> manually takes the error returned by <code>doSomething()</code> and returns it back to <code>passObjectToLib()</code>, then the third party library has to store that error in some <code>interface{}</code>-like untyped variable since it doesn&#x27;t know the actual type. When the error is handed back to <code>passObjectToLib()</code>, the receiving code has to do a dynamic cast. In other words, we have to give up type safety.</p>
+<p>So, my preferred solution here is obvious, if boring: just use exceptions like C++, C#, Java, Python, Ruby, Smalltalk, and most other languages do. It&#x27;s been proven successful, and it&#x27;s familiar to millions of programmers. It&#x27;s popular for a reason.</p>
+<h2>Generics</h2>
+<p>Go may be the only static language created in the past decade that <em>doesn&#x27;t</em> have generics and the lack is a painful omission. Programmers skilled in C++, Java, and C# (not to mention the ML family!) have learned that you can write code that is both flexible <em>and</em> type-safe using type polymorphism. The absence of it in Go takes a major tool out of the toolbox.</p>
+<p>One clear example of how onerous its absence is the vector type in Go. There are three separate vector types, one for [ints][</p>
+<p>], one for [strings][</p>
+<p>], and one for [<code>interface{}</code>][interface</p>
+<p>]. You&#x27;ll notice the code for all three is identical except for the types. Indeed:</p>
+<p>[ints]: https://github.com/golang/go/blob/e6ecf9765ae8aca669f192aff9a112b6fa10dfcb/src/pkg/container/vector/intvector.go [strings</p>
+<p>]: https://github.com/golang/go/blob/e6ecf9765ae8aca669f192aff9a112b6fa10dfcb/src/pkg/container/vector/stringvector.go [interface]: https://github.com/golang/go/blob/e6ecf9765ae8aca669f192aff9a112b6fa10dfcb/src/pkg/container/vector/vector.go</p>
+<pre class="go"><code>// CAUTION: If this file is not vector.go, it was generated
+// automatically from vector.go - DO NOT EDIT in that case!</code></pre>
+<p>I can&#x27;t think of a clearer indicator that a feature is missing. Actually, I can: <code>map</code>. Go has a hashtable collection type which <em>is</em> generic, precisely because it&#x27;s built into the language. It&#x27;s special.</p>
+<p>The rationale I&#x27;ve read (&quot;one map is all you need&quot;) feels out of place in Go. It&#x27;s <em>only</em> in low-level languages like C and C++ that I&#x27;ve had strange requirements that prevented me from using standard components. I can understand that reasoning in Java or C#, but in a systems language I&#x27;d be honestly surprised if one map <em>was</em> all I needed.</p>
+<p>The solution -- adding generics to the language -- is certainly non-trivial, but it isn&#x27;t rocket science either. There&#x27;s a slew of existing languages with support for generics out there, and a wide body of literature to pull from.</p>
+<p>As strange as it sounds, something like C++ templates are probably the closest fit for Go: they play nice with value types, give excellent runtime performance, and can lean on the fact that Go compiles really fast. By not being bound to C&#x27;s syntax and antiquated textual <code>#include</code> compilation model, I believe Go could get much of the power of templates while still being simpler and less finicky than C++.</p>
+<h2>Future-proofing</h2>
+<p>Bertrand Meyer coined something he calls the &quot;[uniform access principle][</p>
+<p>]&quot; which states:</p>
+<p>[uniform access principle]: http://en.wikipedia.org/wiki/Uniform_access_principle</p>
+<blockquote> All services offered by a module should be available through a uniform</blockquote><blockquote> notation, which does not betray whether they are implemented through storage</blockquote><blockquote> or through computation.</blockquote><p>In other words, a built-in field on a type should be indistinguishable at the use site from a calculated property. This is important because it lets you start simple using direct fields but then replace them with calculated properties later without having to touch every callsite.</p>
+<p>In languages that don&#x27;t support this, like Java, you end up speculatively wrapping <em>everything</em> in an abstraction (in this case getters and setters) just <em>in case</em> you find yourself needing that later. I consider this [future-proofing][</p>
+<p>] and I think it&#x27;s one of the biggest sources of the detested boilerplate that led the designers to create Go in the first place.</p>
+<p>[future-proofing]: /2010/09/18/futureproofing-uniform-access-and-masquerades/</p>
+<h3>Other kinds of future-proofing</h3>
+<p>Uniform access talks just about properties but I consider that part of a much larger question: &quot;Can I replace built-in functionality with a user-defined abstraction without having to change each callsite?&quot; Wherever the answer is &quot;no&quot;, you find boilerplate. For example, in most languages a constructor call must always return the named type henceforth and forever. To get around that, you see people hide them behind abstract factories or factory methods.</p>
+<p>Reducing boilerplate has been called out as a major motivator behind Go, and you can see they&#x27;ve taken steps towards mitigating future-proofing. An existing type can retroactively implement a new interface, which is really cool. Likewise, you can add methods to existing types.</p>
+<p>But for many other things, Go has taken steps <em>backwards</em>:</p>
+<ul>
+<li>  <strong>Field access</strong> is different from method calls (which always take <code>()</code>).</li>
+</ul>
+<p>    You can&#x27;t make a calculated property that looks like a field, unlike C# and     most dynamic languages.</p>
+<ul>
+<li>  <strong>Subscript syntax</strong> like <code>array[index]</code> cannot be overloaded (unlike C++</li>
+</ul>
+<p>    and C#). This means that if you start off using an array, slice, or a map     and later decide to used a higher-level collection, you&#x27;ll have to touch     every callsite.</p>
+<ul>
+<li>  <strong>Object allocation</strong> uses special <code>new</code> syntax and can only zero-initialize</li>
+</ul>
+<p>    the object. If you later need more complex initialization, you&#x27;ll have to     replace every <code>new(Foo)</code> call with <code>NewFoo()</code>.</p>
+<p>The solutions for these are fairly straightforward: allow users to overload the syntax. In all cases, all that needs to happen is that some piece of Go syntax gets desugared to a regular method or function call. The way to specify these &quot;special&quot; methods is a [bikeshed][</p>
+<p>] question, but something like this would work without adding any keywords:</p>
+<p>[bikeshed]: http://www.bikeshed.com/</p>
+<pre class="go"><code>// Property getter like `vector.Magnitude`:
+func (vector *Vector) Magnitude__get__() float {
+  // Calculate the magnitude of a vector...
+}
+
+// Property setter like `rect.Width = 4`:
+func (rect *Rect) Width__set__(value int) {
+    // Set the width of the rectangle...
+}
+
+// Subscript operator like `list[index]`:
+func (s *StringList) Subscript__(index int) string {
+  // Get the element at index...
+}
+
+// Subscript operator in assignment like `list[index] = &quot;value&quot;`:
+func (s *StringList) SubscriptSet__(index int, value string) string {
+  // Set the element at index to value...
+}
+
+// Initialization function automatically called after `new(Thing)`
+// creates a zero-valued object.
+func (t *Thing) Init__() {
+  // Initialize the value...
+}</code></pre>
+<p>Minimalists will argue that this just adds needless complexity to the language. My only counter-argument is that it was Java&#x27;s attempts to <em>simplify</em> C++ that leads to code like:</p>
+<pre class="java"><code>book.getChapters().put(book.getChapters().size() - 1,
+  ChapterFactory.instance().create(&quot;Prologue&quot;));</code></pre>
+<p>Instead of:</p>
+<pre class="java"><code>book.chapters[book.chapters.size - 1] = new Chapter(&quot;Prologue&quot;);</code></pre>
+<p>Sometimes a little syntactic sugar goes a long way.</p>
+<p>Right now, Go avoids this by having a culture of not future-proofing. That culture is only sustainable as long as all of the code that your code touches is very easy for you to modify. That&#x27;s true within some small or very agile organizations, but once Go starts moving to wider enterprise use, I fear we&#x27;ll start seeing &quot;best practices&quot; like &quot;always wrap every field in a getter method&quot; and &quot;always hide constructors behind <code>New__</code>&quot; functions and then it&#x27;s Java all over again.</p>
+<h2>Where to go from here</h2>
+<p>If you made it this far, I owe you a beer or something. So, where does this long piece of armchair language design leave us?</p>
+<p>For you, if the language I&#x27;ve described sounds like what you want, you may want to take a look at [BitC][</p>
+<p>]. John Shapiro has recently kicked the dust off of it and started working on it again. It aims to go much farther down the path of low-level control + modern types than other languages I&#x27;ve seen.</p>
+<p>[bitc]: https://github.com/repos-bitc/bitc</p>
+<p>&lt;div class=&quot;update&quot;&gt; &lt;p&gt;&lt;em&gt;Update 2021/10/17:&lt;/em&gt; BitC is dead, but today the low-level systems language that scratches almost all of the itches here is clearly &lt;a href=&quot;https://www.rust-lang.org/&quot;&gt;Rust&lt;/a&gt;.&lt;/p&gt; &lt;/div&gt;</p>
+<p>If you just want a low-level language with lots of expressive tools and most of the features I listed here, then there&#x27;s always C++. The stuff that&#x27;s bad about it is still there, and still bad, but it&#x27;s the only game in town if you want control over memory and generics.</p>
+<p>For me, I&#x27;m gonna get back to working on [my little language][magpie</p>
+<p>]. Meanwhile, if there&#x27;s anything here that the Go community is interested in, I&#x27;m more than up for the challenge of actually implementing it.</p>
+<p>[magpie]: https://magpie-lang.org/ </p>

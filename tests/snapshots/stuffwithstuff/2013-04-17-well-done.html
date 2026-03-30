@@ -1,0 +1,222 @@
+<p>*This is kinda like part three of the Iteration Inside and Out posts, so you may want to check out [part one][</p>
+<p>] and [part two][</p>
+<p>] too. But you don&#x27;t have to.*</p>
+<p>[part one]: /2013/01/13/iteration-inside-and-out/ [part two</p>
+<p>]: /2013/02/24/iteration-inside-and-out-part-2/</p>
+<p>Most programming languages have one or two singleton values floating around. These are special built-in objects that only have a single instance. <code>null</code> or <code>nil</code> are common. Some languages put <code>true</code> and <code>false</code> in the same bucket. JavaScript, ever the hipster, ironically defines one called [<code>undefined</code>][undefined</p>
+<p>].</p>
+<p>[undefined]: http://javascriptweblog.wordpress.com/2010/08/16/understanding-undefined-and-preventing-referenceerrors/</p>
+<p>I wanted to talk a little bit about one I just added to my little language [Magpie][</p>
+<p>]: a [sentinel value] called <code>done</code>. I&#x27;m still not certain it&#x27;s a great idea, but I&#x27;ll walk you through my thoughts. If nothing else, maybe it will serve as a cautionary tale for other, smarter language designers.</p>
+<p>[sentinel value]: http://en.wikipedia.org/wiki/Sentinel_value [magpie</p>
+<p>]: http://magpie-lang.org/</p>
+<h2>Channels</h2>
+<p>I ran into the problem that ultimately led to <code>done</code> when I started working on Magpie&#x27;s concurrency story. Its model is based on [fibers][</p>
+<p>] and [channels][</p>
+<p>], much like [Go][</p>
+<p>] or other [CSP][</p>
+<p>]-inspired languages. You can spin up a new fiber using the <code>async</code> keyword:</p>
+<p>[fibers]: http://en.wikipedia.org/wiki/Green_threads [channels</p>
+<p>]: http://golang.org/doc/effective_go.html#channels [csp]: http://en.wikipedia.org/wiki/Communicating_sequential_processes [go</p>
+<p>]: http://golang.org/</p>
+<pre class="magpie"><code>async
+  print(&quot;I&#x27;m in another fiber!&quot;)
+end</code></pre>
+<p>Fibers are cooperatively scheduled so they only yield to other fibers when they do something that requires waiting. Usually that means IO. So if you do the above, you won&#x27;t see that message get printed until something causes the main fiber to yield. For example:</p>
+<pre class="magpie"><code>async
+  print(&quot;I&#x27;m in another fiber!&quot;)
+end
+
+print(&quot;Before&quot;)
+print(&quot;After&quot;)</code></pre>
+<p>This program will create a second fiber (but not switch to it). Then it gets to <code>print(&quot;Before&quot;)</code> in the main fiber. Since printing is IO, that switches to the second fiber. That in turn queues up <em>its</em> <code>print</code> and suspends again, so the main fiber resumes. Ultimately, it prints:</p>
+<pre><code>Before
+I&#x27;m in another fiber!
+After</code></pre>
+<p>You can spin up lots and lots of fibers because they don&#x27;t use OS threads, just some memory in the interpreter. This is swell for decoupling stuff and running things concurrently. But sometimes you do need to coordinate fibers with each other. For that, we&#x27;ve got channels.</p>
+<p>A channel is a simple object that you can send objects into and then receive them from another channel. You can create one like:</p>
+<pre class="magpie"><code>var channel = Channel new</code></pre>
+<p>To send a value along it, just do:</p>
+<pre class="magpie"><code>channel send(&quot;My value&quot;)</code></pre>
+<p>And you can receive it like:</p>
+<pre class="magpie"><code>var result = channel receive</code></pre>
+<p>The fun bit is that when a fiber sends a value along a channel, it causes that fiber to suspend until some <em>other</em> fiber shows up to receive the value. A send doesn&#x27;t complete until the object has been received. So channels let you not just communicate but also <em>synchronize.</em></p>
+<h2>Show&#x27;s over, folks</h2>
+<p>There&#x27;s one other thing you can do with a channel, you can close it:</p>
+<pre class="magpie"><code>channel close</code></pre>
+<p>That puts the channel out of commission and tells everyone that they will receive no more values from it. The question I ran into was, &quot;What happens to fibers that are waiting to receive on a channel when it gets closed?&quot; For example:</p>
+<pre class="magpie"><code>var channel = Channel new
+
+// Wait for a value and print it.
+async print(channel receive)
+
+// From the main fiber, close the channel.
+channel close</code></pre>
+<p>Here, the second fiber is sitting there, relaxing, maybe having a cocktail while it waits for the channel to spew something forth. But it doesn&#x27;t, it gets closed. The fiber shouldn&#x27;t just stay suspended <em>forever</em>, so how should it get notified?</p>
+<p>One option would be have <code>receive</code> [throw an error][</p>
+<p>] when the channel gets closed. So you&#x27;d handle it something like:</p>
+<p>[throw an error]: http://magpie-lang.org/error-handling.html</p>
+<pre class="magpie"><code>async
+  do
+    print(channel receive)
+  catch err is ChannelClosedError then
+    print(&quot;Sorry, no value for you&quot;)
+  end
+end</code></pre>
+<p>Actually, any [block][</p>
+<p>] can have a <code>catch</code> clause in Magpie, so the explicit <code>do</code> here is redundant. You&#x27;d really just do:</p>
+<p>[block]: http://magpie-lang.org/blocks.html</p>
+<pre class="magpie"><code>async
+  print(channel receive)
+catch err is ChannelClosedError then
+  print(&quot;Sorry, no value for you&quot;)
+end</code></pre>
+<p>That&#x27;s not too bad, but consider something a little more fleshed out. In many cases, you&#x27;ll receive something from a channel and do different stuff based on what you get. Channels are often used for <em>messages</em> and the specific message will often cause different behavior. You can imagine something like:</p>
+<pre class="magpie"><code>var channel = Channel new
+
+async
+  var count = 1
+  while true do
+    match channel receive
+      case &quot;inc&quot; then print(count = count + 1)
+      case &quot;dec&quot; then print(count = count - 1)
+    end
+  end
+end</code></pre>
+<p>Here we&#x27;ve got a little concurrent counter that you can send messages to in order to increment and decrement the value. If it also needs to handle the channel closing, you&#x27;d need to do:</p>
+<pre class="magpie"><code>async
+  var count = 1
+  while true do
+    match channel receive
+      case &quot;inc&quot; then print(count = count + 1)
+      case &quot;dec&quot; then print(count = count - 1)
+    end
+  catch err is ChannelClosedError then
+    print(&quot;Closed&quot;)
+  end
+end</code></pre>
+<p>That feels redundant to me. Catching errors is basically [pattern matching][</p>
+<p>] (in fact, in Magpie it uses the exact same syntax and semantics as a [<code>match</code>][match</p>
+<p>] expression), so it feels dumb to have to have <em>two</em> matches, one for the set of normal values and then this extra <code>catch</code> for the one special &quot;no more values&quot; signal.</p>
+<p>[pattern matching]: http://magpie-lang.org/patterns.html [match</p>
+<p>]: http://magpie-lang.org/pattern-matching.html</p>
+<p>It&#x27;s not just redundant either. Even if you don&#x27;t care about the channel closing, you <em>have</em> to add the <code>catch</code> here. Otherwise, since it&#x27;s a <em>thrown</em> error, it will unwind the fiber&#x27;s callstack on you.</p>
+<p>Both of those are no fun, so I figured, why not just make <code>receive</code> <em>return</em> a value when the channel is closed instead of <em>throwing</em> one. Magpie already has a <code>null</code>-like sentinel value called [<code>nothing</code>][nothing</p>
+<p>], so I could just say <code>receive</code> returns <code>nothing</code> when the channel is closed.</p>
+<p>[nothing]: http://magpie-lang.org/primitives.html#nothing</p>
+<p>But that&#x27;s a bit lame. While <code>nothing</code> doesn&#x27;t appear as often as <code>null</code> does in other languages, it&#x27;s still a general-purpose &quot;no value here&quot; object that users need to be free to use anywhere. If <code>receive</code> returns <code>nothing</code> when the channel is closed, there&#x27;d be no way to explicitly send <code>nothing</code> along an open channel. Receivers wouldn&#x27;t be able to tell the difference.</p>
+<h2>Are we done?</h2>
+<p>So I made another singleton value: <code>done</code>. It exists solely to represent &quot;no more values&quot;. With this, the above code is like:</p>
+<pre class="magpie"><code>async
+  var count = 1
+  while true do
+    match channel receive
+      case &quot;inc&quot; then print(count = count + 1)
+      case &quot;dec&quot; then print(count = count - 1)
+      case done then print(&quot;Closed&quot;)
+    end
+  end
+end</code></pre>
+<p>It may seem weird to have a method return values of different types, but this is natural in Magpie. The language is dynamically typed, and revolves heavily around pattern matching. In, say, JavaScript, if you have a function that can return a number or a string and callers will want to handle those cases differently you get this ugly code:</p>
+<pre class="javascript"><code>var result = foo();
+if (typeof result === &#x27;number&#x27;) {
+  console.log(&quot;number&quot;);
+} else if (typeof result === &#x27;string&#x27;) {
+  console.log(&quot;string&quot;);
+}</code></pre>
+<p>In Magpie, that&#x27;s:</p>
+<pre class="magpie"><code>match foo()
+  case is Num then print(&quot;number&quot;)
+  case is String then print(&quot;string&quot;)
+end</code></pre>
+<p>Or, since the language is expression-oriented, you could even do:</p>
+<pre class="magpie"><code>print(match foo()
+  case is Num then &quot;number&quot;
+  case is String then &quot;string&quot;
+end)</code></pre>
+<p>In fact, because Magpie also has [multimethods][</p>
+<p>], even this would do the right thing:</p>
+<p>[multimethods]: http://magpie-lang.org/multimethods.html</p>
+<pre class="magpie"><code>def showType(is Num) print(&quot;number&quot;)
+def showType(is String) print(&quot;string&quot;)
+
+showType(foo())</code></pre>
+<p>Where was I? Oh, right. So it&#x27;s totally kosher to have methods return values of different types and have callers dispatch on them. That was enough to talk myself into being OK with <code>receive</code> having a sort of ad-hoc variant-like return value.</p>
+<h2>The next iteration</h2>
+<p>Once I had that, I started fleshing out channels a bit more. One thing I noticed is that you often read from a channel repeatedly. See that <code>while true do</code> loop up there? That seemed a bit silly. Magpie has <code>for</code> loops. Like [most][iterator</p>
+<p>] [languages][ienumerator</p>
+<p>], those are syntactic sugar for an [iteration protocol][</p>
+<p>]. If I made channels support that directly, you could do:</p>
+<p>[iterator]: http://docs.oracle.com/javase/6/docs/api/java/util/Iterator.html [ienumerator</p>
+<p>]: http://msdn.microsoft.com/en-us/library/78dfe2yb.aspx [iteration protocol]: http://docs.python.org/2/c-api/iter.html</p>
+<pre class="magpie"><code>async
+    var count = 1
+    for value in channel receive
+        match value
+            case &quot;inc&quot; then print(count = count + 1)
+            case &quot;dec&quot; then print(count = count - 1)
+        end
+    end
+    print(&quot;Closed&quot;)
+end</code></pre>
+<p>This protocol has two levels: iter<em>able</em> and iter<em>ator</em>. The iterable protocol is for an object that can be iterated: lists, collections, etc. There&#x27;s just one method:</p>
+<pre class="magpie"><code>def (is Iterable) iterate</code></pre>
+<p>An iterable type specializes <code>iterate</code> to return a new iterator for the object. This lets you iterate over objects without modifying the original object. It would be pretty weird if you could only use a list in one loop at a time.</p>
+<p>In the case of channels, though, iterating it <em>is</em> mutating the original object, so <code>iterate</code> on a channel just returns the same object. Channels are both iterables <em>and</em> iterators. The iterat<em>or</em> protocol was two methods:</p>
+<pre class="magpie"><code>def (is Iterator) advance</code></pre>
+<p>This tries to advance the iterator to the next item and returns <code>true</code> if it found another item.</p>
+<pre class="magpie"><code>def (is Iterator) current</code></pre>
+<p>This returns the current item. So there was a two method protocol here. Most other languages have something similar. You need two methods because one crank of the iterator needs to return two bits of data: whether or not you&#x27;re done iterating, and the next value if you aren&#x27;t.</p>
+<p>I say &quot;<em>was</em> a two method protocol&quot; because now that I had this <code>done</code> value, I realized I could simplify it. All I need is <code>advance</code>. It returns the next item if there is one, or <code>done</code> if there isn&#x27;t. The only thing you lose is the ability to iterate over a collection that actually contains <code>done</code> as a value. But I&#x27;m OK with that. That seems like a small thing to give up to get a simpler protocol.</p>
+<p>Now, not only can you use channels any place you work with sequences, but even implementing your own sequences is a little easier.</p>
+<h2>Your favorite functional friends</h2>
+<p>When I say &quot;any place you work with sequences,&quot; much of what I&#x27;m thinking of is those workhorse methods that transform sequences. Good old [<code>map()</code>][map</p>
+<p>], [<code>filter()</code>][filter</p>
+<p>], [<code>fold()</code>][fold</p>
+<p>], etc. This gives you a feel for what they look like in Magpie:</p>
+<p>[map]: http://en.wikipedia.org/wiki/Map_(higher-order_function) [filter</p>
+<p>]: http://en.wikipedia.org/wiki/Filter_(higher-order_function) [fold]: http://en.wikipedia.org/wiki/Fold_(higher-order_function)</p>
+<pre class="magpie"><code>var list = [1, 2, 3, 4]
+list map(fn(i) i * 3) // 3, 6, 9, 12.
+list where(fn(i) i % 2 == 0) // 2, 4.</code></pre>
+<p>Since I specialized these on Iterable, that means any iterable type, including channels, gets them. For a longer example, Go has [an example][go sieve</p>
+<p>] showing a concurrent [Sieve of Eratosthenes][</p>
+<p>]. Ported to Magpie, it looks like:</p>
+<p>[go sieve]: http://golang.org/doc/play/sieve.go [sieve of eratosthenes</p>
+<p>]: http://en.wikipedia.org/wiki/Sieve_of_Eratosthenes</p>
+<pre class="magpie"><code>// Send the sequence 2, 3, 4, ... to &#x27;channel&#x27;.
+def generate(channel is Channel) async
+  for i in 2..9999 do channel send(i)
+end
+
+// Copy the values from &#x27;input&#x27; to &#x27;out&#x27;,
+// removing those divisible by &#x27;prime&#x27;.
+def filter(input is Channel, out is Channel, prime is Int) async
+  input where(fn(i) i % prime != 0) pipeTo(out)
+end
+
+// The prime sieve: Daisy-chain Filter processes.
+var channel = Channel new
+generate(channel) // Spawn generate fiber.
+
+for i in 0..50 do
+  val prime = print(channel receive)
+  val sieve = Channel new
+  filter(channel, sieve, prime)
+  channel = sieve
+end</code></pre>
+<p>I won&#x27;t walk you through the whole thing, but I do think it&#x27;s pretty rad. The neat bit is this line:</p>
+<pre class="magpie"><code>input where(fn(i) i % prime != 0) pipeTo(output)</code></pre>
+<p>Here, <code>where()</code> is Magpie&#x27;s filter function. It takes an iterable on the left and a predicate function on the right. It returns an iterable generating all of the items of the original sequence where the predicate returns <code>true</code>. Note that here, the argument on the left is a <em>channel</em> so this magically becomes an <em>asynchronous</em> filter.</p>
+<p>Likewise, <code>pipeTo()</code> is a method that takes an iterable and a channel and sends all of the values in the iterable to the channel. So we&#x27;re taking a channel, filtering it like a collection, then pumping that collection back into a new channel. This all happens asynchronously, but the code looks like you&#x27;re just playing with regular collections.</p>
+<p>Crap, I&#x27;ve digressed again. I was supposed to be talking about <code>done</code>. I just think treating channels as sequences is really cool. OK, back to the matter at hand.</p>
+<h2>Now are we done yet?</h2>
+<p>The simplest of the higher-order methods for working with iterables is <code>each()</code>. All it does is call the given function for each item in the sequence. In other languages this is sometimes called <code>forEach()</code>. Most of the time you don&#x27;t need it since it is almost identical to just using a built-in <code>for</code> loop. But sometimes it&#x27;s convenient, so Magpie has it.</p>
+<p>If you&#x27;ve worked with [<code>forEach()</code>][foreach</p>
+<p>] in JavaScript, one nasty problem is how do you stop early if you don&#x27;t actually need to walk the whole sequence? Ruby has some special syntax built into the language, <code>break</code> and <code>next</code>, that are designed to work specifically with blocks and iterators. JS ain&#x27;t so lucky.</p>
+<p>Magpie has <code>break</code> for <code>for</code> loops, but a method like <code>each</code> is just a method that takes a function. You can&#x27;t <code>break</code> from within a function. But... since we have this <code>done</code> value laying around, we can use it here too. So the way <code>each()</code> (and <code>map()</code> and <code>where()</code> and others) work is if the callback ever returns <code>done</code> that means &quot;stop iterating now&quot;.</p>
+<p>[foreach]: https://developer.mozilla.org/en-US/docs/JavaScript/Reference/Global_Objects/Array/forEach</p>
+<p>For example:</p>
+<pre class="magpie"><code>[1, 2, 3, 4] map(fn(i) if i &lt; 3 then i * 2 else done)</code></pre>
+<p>This will not only transform the values -- what <code>map()</code> usually does -- but it will also truncate the sequence and just return <code>[2, 4]</code>.</p>
+<p>So we&#x27;ve got an easier way to handle closed channels, a simpler iterator protocol, and more expressive collection-manipulation methods. Not too bad for one little sentinel value. </p>

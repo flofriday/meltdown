@@ -1,0 +1,213 @@
+<p>If you were on [reddit][</p>
+<p>] today, you probably saw [this article][</p>
+<p>], damning C#&#x27;s performance as being <strong>ten times worse than C++&#x27;s</strong>. Holy shit balls, batman!</p>
+<p>[reddit]: http://www.reddit.com/r/programming/ [this article</p>
+<p>]: http://systematicgaming.wordpress.com/2009/01/03/performance-c-vs-c/</p>
+<p>Running his C# code, here are the results I got:</p>
+<h2>Original C# code</h2>
+<p>&lt;div class=&quot;table&quot;&gt; &lt;table&gt; &lt;thead&gt; &lt;tr&gt; &lt;td class=&quot;right&quot;&gt;Array Size&lt;/td&gt; &lt;td class=&quot;right&quot;&gt;SortTest&lt;/td&gt; &lt;td class=&quot;right&quot;&gt;SortTestT&lt;/td&gt; &lt;td class=&quot;right&quot;&gt;SortTestTC&lt;/td&gt; &lt;td class=&quot;right&quot;&gt;SortIndirect&lt;/td&gt; &lt;/tr&gt; &lt;/thead&gt; &lt;tr&gt; &lt;td class=&quot;right&quot;&gt;1024&lt;/td&gt; &lt;td class=&quot;right&quot;&gt;10.7162&lt;/td&gt; &lt;td class=&quot;right&quot;&gt;2.3441&lt;/td&gt; &lt;td class=&quot;right&quot;&gt;3.8781&lt;/td&gt; &lt;td class=&quot;right&quot;&gt;1.1366&lt;/td&gt; &lt;/tr&gt; &lt;tr&gt; &lt;td class=&quot;right&quot;&gt;2048&lt;/td&gt; &lt;td class=&quot;right&quot;&gt;22.9509&lt;/td&gt; &lt;td class=&quot;right&quot;&gt;4.3889&lt;/td&gt; &lt;td class=&quot;right&quot;&gt;8.4408&lt;/td&gt; &lt;td class=&quot;right&quot;&gt;1.8714&lt;/td&gt; &lt;/tr&gt; &lt;tr&gt; &lt;td class=&quot;right&quot;&gt;4096&lt;/td&gt; &lt;td class=&quot;right&quot;&gt;49.3709&lt;/td&gt; &lt;td class=&quot;right&quot;&gt;8.4452&lt;/td&gt; &lt;td class=&quot;right&quot;&gt;17.3883&lt;/td&gt; &lt;td class=&quot;right&quot;&gt;3.7319&lt;/td&gt; &lt;/tr&gt; &lt;tr&gt; &lt;td class=&quot;right&quot;&gt;8192&lt;/td&gt; &lt;td class=&quot;right&quot;&gt;103.5701&lt;/td&gt; &lt;td class=&quot;right&quot;&gt;18.5369&lt;/td&gt; &lt;td class=&quot;right&quot;&gt;38.1285&lt;/td&gt; &lt;td class=&quot;right&quot;&gt;8.0310&lt;/td&gt; &lt;/tr&gt; &lt;tr&gt; &lt;td class=&quot;right&quot;&gt;16384&lt;/td&gt; &lt;td class=&quot;right&quot;&gt;220.9323&lt;/td&gt; &lt;td class=&quot;right&quot;&gt;39.6958&lt;/td&gt; &lt;td class=&quot;right&quot;&gt;80.9258&lt;/td&gt; &lt;td class=&quot;right&quot;&gt;18.5821&lt;/td&gt; &lt;/tr&gt; &lt;tr&gt; &lt;td class=&quot;right&quot;&gt;32768&lt;/td&gt; &lt;td class=&quot;right&quot;&gt;469.5507&lt;/td&gt; &lt;td class=&quot;right&quot;&gt;84.5129&lt;/td&gt; &lt;td class=&quot;right&quot;&gt;172.2964&lt;/td&gt; &lt;td class=&quot;right&quot;&gt;41.2126&lt;/td&gt; &lt;/tr&gt; &lt;tr&gt; &lt;td class=&quot;right&quot;&gt;65536&lt;/td&gt; &lt;td class=&quot;right&quot;&gt;1016.2149&lt;/td&gt; &lt;td class=&quot;right&quot;&gt;188.6718&lt;/td&gt; &lt;td class=&quot;right&quot;&gt;380.3507&lt;/td&gt; &lt;td class=&quot;right&quot;&gt;93.2924&lt;/td&gt; &lt;/tr&gt; &lt;tr&gt; &lt;td class=&quot;right&quot;&gt;131072&lt;/td&gt; &lt;td class=&quot;right&quot;&gt;2156.4188&lt;/td&gt; &lt;td class=&quot;right&quot;&gt;399.7299&lt;/td&gt; &lt;td class=&quot;right&quot;&gt;791.6437&lt;/td&gt; &lt;td class=&quot;right&quot;&gt;210.9526&lt;/td&gt; &lt;/tr&gt; &lt;tr&gt; &lt;td class=&quot;right&quot;&gt;262144&lt;/td&gt; &lt;td class=&quot;right&quot;&gt;4616.3540&lt;/td&gt; &lt;td class=&quot;right&quot;&gt;847.9829&lt;/td&gt; &lt;td class=&quot;right&quot;&gt;1692.9814&lt;/td&gt; &lt;td class=&quot;right&quot;&gt;467.6020&lt;/td&gt; &lt;/tr&gt; &lt;tr&gt; &lt;td class=&quot;right&quot;&gt;524288&lt;/td&gt; &lt;td class=&quot;right&quot;&gt;9732.4311&lt;/td&gt; &lt;td class=&quot;right&quot;&gt;1793.9729&lt;/td&gt; &lt;td class=&quot;right&quot;&gt;3545.2089&lt;/td&gt; &lt;td class=&quot;right&quot;&gt;1038.2164&lt;/td&gt; &lt;/tr&gt; &lt;/table&gt; &lt;/div&gt;</p>
+<p>Pretty slow! So I took a look at the code. The first thing that would catch the eye of any C# programmer is this:</p>
+<pre class="csharp"><code>unsafe struct Data
+{
+    public int key;
+    public fixed char data[128];
+}</code></pre>
+<p><em>That&#x27;s</em> the data structure he&#x27;s sorting. An unsafe struct with a fixed array? I had to look up <code>fixed</code> to even know what that <em>means</em>. Now, I understand that he&#x27;s trying to make an apples/apples comparison and keep the data structure as close to the C++ one as possible, but I think that&#x27;s missing the point. If you&#x27;re going to compare two languages, using their <em>built-in typical sort functions</em>, shouldn&#x27;t you use their typical <em>data structures</em> too? Here&#x27;s how a regular C# developer would define <code>Data</code>:</p>
+<pre class="csharp"><code>class Data
+{
+    public int key;
+    public char[] data;
+
+    public Data() { data = new char[128]; }
+}</code></pre>
+<p>No unmanaged code, no structs (which are rarely used in C#). Just a regular class with an array. Here&#x27;s the results:</p>
+<h2>Modified to typical C# code</h2>
+<p>&lt;div class=&quot;table&quot;&gt; &lt;table&gt; &lt;thead&gt; &lt;tr&gt; &lt;td class=&quot;right&quot;&gt;Array Size&lt;/td&gt; &lt;td class=&quot;right&quot;&gt;SortTest&lt;/td&gt; &lt;td class=&quot;right&quot;&gt;SortTestT&lt;/td&gt; &lt;td class=&quot;right&quot;&gt;SortTestTC&lt;/td&gt; &lt;td class=&quot;right&quot;&gt;SortIndirect&lt;/td&gt; &lt;/tr&gt; &lt;/thead&gt; &lt;tr&gt; &lt;td class=&quot;right&quot;&gt;1024&lt;/td&gt; &lt;td class=&quot;right&quot;&gt;0.3605&lt;/td&gt; &lt;td class=&quot;right&quot;&gt;0.3626&lt;/td&gt; &lt;td class=&quot;right&quot;&gt;0.4150&lt;/td&gt; &lt;td class=&quot;right&quot;&gt;0.5918&lt;/td&gt; &lt;/tr&gt; &lt;tr&gt; &lt;td class=&quot;right&quot;&gt;2048&lt;/td&gt; &lt;td class=&quot;right&quot;&gt;0.7651&lt;/td&gt; &lt;td class=&quot;right&quot;&gt;0.7446&lt;/td&gt; &lt;td class=&quot;right&quot;&gt;0.8749&lt;/td&gt; &lt;td class=&quot;right&quot;&gt;0.5021&lt;/td&gt; &lt;/tr&gt; &lt;tr&gt; &lt;td class=&quot;right&quot;&gt;4096&lt;/td&gt; &lt;td class=&quot;right&quot;&gt;1.6434&lt;/td&gt; &lt;td class=&quot;right&quot;&gt;1.6094&lt;/td&gt; &lt;td class=&quot;right&quot;&gt;1.9468&lt;/td&gt; &lt;td class=&quot;right&quot;&gt;1.2030&lt;/td&gt; &lt;/tr&gt; &lt;tr&gt; &lt;td class=&quot;right&quot;&gt;8192&lt;/td&gt; &lt;td class=&quot;right&quot;&gt;3.6497&lt;/td&gt; &lt;td class=&quot;right&quot;&gt;3.5216&lt;/td&gt; &lt;td class=&quot;right&quot;&gt;4.1014&lt;/td&gt; &lt;td class=&quot;right&quot;&gt;2.3926&lt;/td&gt; &lt;/tr&gt; &lt;tr&gt; &lt;td class=&quot;right&quot;&gt;16384&lt;/td&gt; &lt;td class=&quot;right&quot;&gt;7.9555&lt;/td&gt; &lt;td class=&quot;right&quot;&gt;8.0842&lt;/td&gt; &lt;td class=&quot;right&quot;&gt;9.3324&lt;/td&gt; &lt;td class=&quot;right&quot;&gt;5.4752&lt;/td&gt; &lt;/tr&gt; &lt;tr&gt; &lt;td class=&quot;right&quot;&gt;32768&lt;/td&gt; &lt;td class=&quot;right&quot;&gt;21.1833&lt;/td&gt; &lt;td class=&quot;right&quot;&gt;19.1183&lt;/td&gt; &lt;td class=&quot;right&quot;&gt;23.1170&lt;/td&gt; &lt;td class=&quot;right&quot;&gt;15.1998&lt;/td&gt; &lt;/tr&gt; &lt;tr&gt; &lt;td class=&quot;right&quot;&gt;65536&lt;/td&gt; &lt;td class=&quot;right&quot;&gt;54.6938&lt;/td&gt; &lt;td class=&quot;right&quot;&gt;53.4892&lt;/td&gt; &lt;td class=&quot;right&quot;&gt;72.3932&lt;/td&gt; &lt;td class=&quot;right&quot;&gt;34.6554&lt;/td&gt; &lt;/tr&gt; &lt;tr&gt; &lt;td class=&quot;right&quot;&gt;131072&lt;/td&gt; &lt;td class=&quot;right&quot;&gt;122.5008&lt;/td&gt; &lt;td class=&quot;right&quot;&gt;114.1937&lt;/td&gt; &lt;td class=&quot;right&quot;&gt;141.3504&lt;/td&gt; &lt;td class=&quot;right&quot;&gt;75.9064&lt;/td&gt; &lt;/tr&gt; &lt;tr&gt; &lt;td class=&quot;right&quot;&gt;262144&lt;/td&gt; &lt;td class=&quot;right&quot;&gt;279.8014&lt;/td&gt; &lt;td class=&quot;right&quot;&gt;262.5908&lt;/td&gt; &lt;td class=&quot;right&quot;&gt;343.4204&lt;/td&gt; &lt;td class=&quot;right&quot;&gt;160.8344&lt;/td&gt; &lt;/tr&gt; &lt;tr&gt; &lt;td class=&quot;right&quot;&gt;524288&lt;/td&gt; &lt;td class=&quot;right&quot;&gt;598.5605&lt;/td&gt; &lt;td class=&quot;right&quot;&gt;577.7487&lt;/td&gt; &lt;td class=&quot;right&quot;&gt;759.4405&lt;/td&gt; &lt;td class=&quot;right&quot;&gt;359.7824&lt;/td&gt; &lt;/tr&gt; &lt;/table&gt; &lt;/div&gt;</p>
+<p>Let&#x27;s compare the last lines of each:</p>
+<p>&lt;div class=&quot;table&quot;&gt; &lt;table&gt; &lt;thead&gt; &lt;tr&gt; &lt;td&gt;Data Type&lt;/td&gt; &lt;td class=&quot;right&quot;&gt;SortTest&lt;/td&gt; &lt;td class=&quot;right&quot;&gt;SortTestT&lt;/td&gt; &lt;td class=&quot;right&quot;&gt;SortTestTC&lt;/td&gt; &lt;td class=&quot;right&quot;&gt;SortIndirect&lt;/td&gt; &lt;/tr&gt; &lt;/thead&gt; &lt;tr&gt; &lt;td&gt;struct/fixed&lt;/td&gt; &lt;td class=&quot;right&quot;&gt;9732.4311&lt;/td&gt; &lt;td class=&quot;right&quot;&gt;1793.9729&lt;/td&gt; &lt;td class=&quot;right&quot;&gt;3545.2089&lt;/td&gt; &lt;td class=&quot;right&quot;&gt;1038.2164&lt;/td&gt; &lt;/tr&gt; &lt;tr&gt; &lt;td&gt;class&lt;/td&gt; &lt;td class=&quot;right&quot;&gt;598.5605&lt;/td&gt; &lt;td class=&quot;right&quot;&gt;577.7487&lt;/td&gt; &lt;td class=&quot;right&quot;&gt;759.4405&lt;/td&gt; &lt;td class=&quot;right&quot;&gt;359.7824&lt;/td&gt; &lt;/tr&gt; &lt;tr&gt; &lt;td&gt;how much faster&lt;/td&gt; &lt;td class=&quot;right&quot;&gt;&lt;b&gt;16.259x&lt;/b&gt;&lt;/td&gt; &lt;td class=&quot;right&quot;&gt;&lt;b&gt;3.105x&lt;/b&gt;&lt;/td&gt; &lt;td class=&quot;right&quot;&gt;&lt;b&gt;4.668x&lt;/b&gt;&lt;/td&gt; &lt;td class=&quot;right&quot;&gt;&lt;b&gt;2.885x&lt;/b&gt;&lt;/td&gt; &lt;/tr&gt; &lt;/table&gt; &lt;/div&gt;</p>
+<p>Um, <em>slightly</em> different? In his original post, he states that the indirect sorting is twice as fast in C++ than in C#. I can&#x27;t do a direct comparison since I didn&#x27;t run the C++ code, but since my change to the C# made it run 2.885 times faster than his C# code, it stands to reason that the <strong>C# and C++ performance are neck and neck, if not a bit faster in C#</strong>.</p>
+<h2>Apples to oranges to avocados</h2>
+<p>If you&#x27;re rooting for the C++ side, you&#x27;re probably thinking, &quot;No fair! The C# one didn&#x27;t have to move the whole array around in memory!&quot; Well, yeah, it didn&#x27;t: <em>because that&#x27;s how C# programmers use the language</em>. Since it&#x27;s safe to rely on the garbage collector to handle deallocations, C# programmers don&#x27;t spend effort avoiding using &quot;dangerous&quot; pointers (i.e. reference types). This is simply how the language is used. To me, the fairest comparison is one that preserves both the procedures (which he did by using the built-in sorts) <em>and</em> the data structures (which he did not do) used by each language.</p>
+<h2>The code</h2>
+<p>Aside from the <code>Data</code> change above, I cleaned up some of the copy and paste in his code. Here&#x27;s what I used:</p>
+<pre class="csharp"><code>using System;
+using System.Collections;
+using System.Collections.Generic;
+using System.Text;
+using System.Runtime.InteropServices;
+
+namespace CachePressureCS
+{
+    // normal c# type
+    class Data
+    {
+        public int key;
+        public char[] data;
+
+        public Data() { data = new char[128]; }
+    }
+
+    class DataComparer : IComparer
+    {
+        int IComparer.Compare(Object x, Object y)
+        {
+            return ((Data)x).key - ((Data)y).key;
+        }
+    }
+
+    class DataComparerT : IComparer&lt;Data&gt;
+    {
+        public int Compare(Data x, Data y)
+        {
+            return x.key - y.key;
+        }
+    }
+
+    class Timer
+    {
+        [DllImport(&quot;Kernel32.dll&quot;)]
+        private static extern bool QueryPerformanceCounter(
+            out long counter);
+
+        [DllImport(&quot;Kernel32.dll&quot;)]
+        private static extern bool QueryPerformanceFrequency(
+            out long frequency);
+
+        public Timer()
+        {
+            mStart = mEnd = 0;
+            QueryPerformanceFrequency(out mFrequency);
+        }
+
+        public void Start() { QueryPerformanceCounter(out mStart); }
+
+        public void End() { QueryPerformanceCounter(out mEnd); }
+
+        public double Time
+        {
+            get {
+                return 1000.0 * (double)(mEnd - mStart) /
+                    (double)mFrequency;
+            }
+        }
+
+        long mFrequency;
+        long mStart;
+        long mEnd;
+    }
+
+    class Program
+    {
+        static int CompareData(Data x, Data y)
+        {
+            return x.key - y.key;
+        }
+
+        static Data[] MakeData(int size)
+        {
+            Random rng = new Random(0);
+            Data[] data = new Data[size];
+
+            for (int i = 0; i &lt; data.Length; i++)
+            {
+                data[i] = new Data();
+                data[i].key = rng.Next();
+            }
+
+            return data;
+        }
+
+        static double Test(int size, Action&lt;Data[]&gt; sort)
+        {
+            Timer time = new Timer();
+            Data[] data = MakeData(size);
+
+            time.Start();
+            sort(data);
+            time.End();
+
+            return time.Time;
+        }
+
+        static double SortTest(int size)
+        {
+            return Test(size, data =&gt;
+                Array.Sort(data, new DataComparer()));
+        }
+
+        static double SortTestT(int size)
+        {
+            return Test(size, data =&gt;
+                Array.Sort&lt;Data&gt;(data, new DataComparerT()));
+        }
+
+        static double SortTestTC(int size)
+        {
+            return Test(size, data =&gt;
+                Array.Sort&lt;Data&gt;(data, CompareData));
+        }
+
+        static double SortTestC(int size)
+        {
+            return Test(size, data =&gt;
+                Array.Sort(data, CompareData));
+        }
+
+        static double SortTestIndirect(int size)
+        {
+            Random rng = new Random(0);
+            Timer time = new Timer();
+            Data[] data = new Data[size];
+            int[] indirect = new int[size];
+
+            for (int i = 0; i &lt; data.Length; i++)
+            {
+                data[i] = new Data();
+                data[i].key = rng.Next();
+                indirect[i] = data[i].key;
+            }
+
+            time.Start();
+            Array.Sort&lt;int, Data&gt;(indirect, data);
+            time.End();
+
+            return time.Time;
+        }
+
+        private static void Time(Func&lt;int, double&gt; fn, int size)
+        {
+            double time = 0;
+            for (int j = 0; j &lt; 10; j++)
+            {
+                time += fn(size);
+            }
+            time /= 10.0;
+
+            Console.Write(&quot;{0,14:F4}&quot;, time);
+        }
+
+        static void Main(string[] args)
+        {
+            Console.WriteLine(&quot;    size      SortTest     SortTestT&quot; +
+                &quot;    SortTestTC  SortIndirect&quot;);
+            Console.WriteLine(&quot;-------- ------------- &quot; +
+                &quot;------------- ------------- -------------&quot;);
+
+            for (int i = 0; i &lt; 10; i++)
+            {
+                int size = 1024 &lt;&lt; i;
+
+                Console.Write(&quot;{0,8}&quot;, size);
+                Time(SortTest, size);
+                Time(SortTestT, size);
+                Time(SortTestTC, size);
+                Time(SortTestIndirect, size);
+
+                Console.WriteLine();
+            }
+
+            Console.ReadKey();
+        }
+    }
+}</code></pre>
+<p></p>

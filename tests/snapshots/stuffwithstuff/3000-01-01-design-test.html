@@ -1,0 +1,118 @@
+<p>This is a temporary post to test all of the CSS for the design. It contains at least one of every kind of style that appears across all of the posts. Here is some inline <em>emphasized text</em>, some <strong>strong text</strong>, and some <code>inline code</code>. Here&#x27;s &quot;a double quote&quot;, an apostrophe -- it was before the quote -- and some em dashes. Every now and then, I use strikethrough <del>to make a dumb joke</del> for some important purpose.</p>
+<p>Here is <a href="#">a link</a>, and a <a href="#"><code>code link</code></a>. It&#x27;s not common, but inline styles can sometimes be combined. So far, I&#x27;ve seen <em>emphasis with <a href="#">a link</a> inside of it</em>, <strong>bold with <code>code inside</code> of it</strong>, <strong>bold with <a href="#">a link</a> inside of it</strong>, and <strong>bold with <em>emphasis</em> inside of it</strong>. I think I avoid <em>emphasis with <code>code</code> inside it</em>, but here&#x27;s what it looks like just in case.</p>
+<p>There are a few pages that have their own special sauce. You&#x27;ll want to check those too:</p>
+<ul>
+<li>The skull footnote markers in <a href="/2015/09/08/the-hardest-program-ive-ever-written/">&quot;The Hardest Program I&#x27;ve Ever Written&quot;</a>.</li>
+</ul>
+<ul>
+<li>The sliders under the canvases in <a href="/2014/12/21/rooms-and-mazes/">&quot;Rooms and Mazes&quot;</a>.</li>
+</ul>
+<ul>
+<li>The very long title may split across three lines in [&quot;Methods on the</li>
+</ul>
+<p>  Ether...&quot;](/2010/06/25/methods-on-the-ether-or-creating-your-own-control-structures-for-fun-and-profit/).</p>
+<ul>
+<li>Usually a heading is followed by body text, but [&quot;Naming Things in</li>
+</ul>
+<p>  Code&quot;](/2009/06/05/naming-things-in-code/) has a few sections with code right   after the heading.</p>
+<ul>
+<li>Headings are usually only one line, but <a href="/2009/05/05/one-and-only-one/#hey-i-thought-you-said-functions-always-take-one-argument">&quot;One and Only One&quot;</a> has a few long ones.</li>
+</ul>
+<ul>
+<li>There is a table on <a href="http://localhost:8000/2009/01/03/debunking-c-vs-c-performance/">&quot;Debunking C# vs C++ Performance&quot;</a>.</li>
+</ul>
+<h2>Syntax highlighting</h2>
+<p>If you are iterating on the syntax highlighting for various languages, check out <a href="/code.html">this generated page with all of the code snippets</a>.</p>
+<h2>Heading H2 with &quot;Quotes&quot; and <code>code</code> inside</h2>
+<p>A paragraph of text.</p>
+<h3>Heading H3 with &quot;Quotes&quot; and <code>code</code> inside</h3>
+<p>A paragraph of text. Next is a horizontal rule.</p>
+<h2>A very long H2 heading to see how it looks when wrapped to two lines</h2>
+<p>A paragraph of text.</p>
+<h3>A very long H3 heading to see how it looks when wrapped to two lines</h3>
+<p>A paragraph of text. Next is a horizontal rule.</p>
+<p>---</p>
+<p>Followed by another paragraph of text.</p>
+<h2>Lists</h2>
+<p>Here is an ordered list:</p>
+<p>1.  The &lt;span name=&quot;first&quot;&gt;first&lt;/span&gt; list item. It has a multi-line paragraph     of text to see how paragraph of text to see how that looks.</p>
+<p>    &lt;aside name=&quot;first&quot;&gt;</p>
+<p>    This is an aside. It should be aligned with the word &quot;first&quot; in the first     bullet list item. Asides can have inline styles like <em>emphasis</em>, <strong>strong</strong>,     and <code>code</code>. They can also have <a href="#">links</a> and <a href="#"><code>code links</code></a>.</p>
+<p>    Asides can have multiple paragraphs. This is another one with some more     text in it.</p>
+<p>    &lt;/aside&gt;</p>
+<p>    It also has multiple paragraphs within the list item to test that out as     well. There can also be code blocks in lists:</p>
+<p>    <code></code>`c     void main() {       printf(&quot;Hello, world!\n&quot;);     }     <code></code>`</p>
+<p>    More text after the code block.</p>
+<p>2.  The second list item. Short.</p>
+<p>    1.  But it does have a nested child list.</p>
+<p>    2.  And the second item in the nested list is long enough to split across         multiple lines so we can see how that looks.</p>
+<p>3.  Then a final third list item.</p>
+<p>Here is an unordered list:</p>
+<ul>
+<li>  The first list item. It has a multi-line paragraph of text to see how</li>
+</ul>
+<p>    paragraph of text to see how that looks.</p>
+<p>    It also has multiple paragraphs within the list item to test that out as     well.</p>
+<ul>
+<li>  The second list item. Short.</li>
+</ul>
+<p>    *   But it does have a nested child list.</p>
+<p>    *   And the second item in the nested list is long enough to split across         multiple lines so we can see how that looks.</p>
+<ul>
+<li>  Then a &lt;span name=&quot;final&quot;&gt;final&lt;/span&gt; third list item.</li>
+</ul>
+<p>    &lt;aside name=&quot;final&quot; class=&quot;bottom&quot;&gt;</p>
+<p>    Asides can also be aligned where the bottom is aligned to the main text,     like this one which should be aligned with &quot;final&quot; in the last bullet point.     This style is to handle cases where an aside appears near some other     content below it in the sidebar.</p>
+<p>    &lt;/aside&gt;</p>
+<h2>Code blocks</h2>
+<p>Here is a block of highlighted code:</p>
+<pre class="vgs"><code>def onTick()
+  var d = 0
+  if buttonHeld(2) then d = d - 1 end
+  if buttonHeld(3) then d = d + 1 end
+
+  if buttonPressed(0) then
+    if y == 200 then
+      playSequence()
+      v = -10.0
+    end
+  end
+end</code></pre>
+<p>And some ASCII art, which has a different line height to make box drawing characters look better:</p>
+<pre class="asciiart"><code>stack                       heap
+┌─────────────────────┐
+│ iterator.MoveNext() │
+├─────────────────────┤     ┌───────────────────┐
+│ loop body           │ ──&gt; │ DesugaredIterator │
+└─────────────────────┘     └───────────────────┘</code></pre>
+<h2>Boxes</h2>
+<p>There are a couple of kinds of box-delimited content.</p>
+<blockquote> Blockquotes look like this. They are how I reference text from other sources</blockquote><blockquote> or direct quotations that others have said.</blockquote><blockquote></blockquote><blockquote> Blockquotes can have multiple paragraphs and inline styles like <em>emphasis</em>,</blockquote><blockquote> <strong>strong</strong>, and <code>code</code>. They can also have <a href="#">links</a> and <a href="#"><code>code links</code></a>.</blockquote><blockquote></blockquote><blockquote> *   In a couple of places, there are blockquotes containing bullet lists.</blockquote><blockquote>     They can be multiple lines.</blockquote><blockquote></blockquote><blockquote>     Or even multiple paragraphs.</blockquote><blockquote></blockquote><blockquote> *   Here&#x27;s another bullet list item.</blockquote><blockquote></blockquote><blockquote>     * And one post that quotes a language spec.</blockquote><blockquote></blockquote><blockquote>         * Ends up with a three-level deep list in a blockquote.</blockquote><blockquote></blockquote><blockquote>         * Another item to make sure Markdown wraps the list items in</blockquote><blockquote>           paragraphs.</blockquote><p>Some blockquotes have an author attached to them, like this:</p>
+<p>&lt;blockquote class=&quot;cited&quot;&gt;</p>
+<p>People put all sorts of words in my mouth that I never said. They should cut that out.</p>
+<p>&lt;/blockquote&gt; &lt;p class=&quot;cite&quot;&gt;Abraham Lincoln&lt;/p&gt;</p>
+<p>There are also update boxes:</p>
+<p>&lt;div class=&quot;update&quot;&gt;</p>
+<p><em>Update 2021/09/22:</em> Update boxes like this one usually note changes I&#x27;ve made to a post after it was published.</p>
+<p>Update boxes can have multiple paragraphs and inline styles like <em>emphasis</em>, <strong>strong</strong>, and <code>code</code>. They can also have <a href="#">links</a> and <a href="#"><code>code links</code></a>.</p>
+<blockquote> Surprisingly enough, they can even have blockquotes in them. And to make</blockquote><blockquote> things crazier, the blockquote might have <code>code</code>, or presumably other inline</blockquote><blockquote> styles like <em>emphasis</em> and <strong>strong</strong>.</blockquote><blockquote></blockquote><blockquote> And of course it can be multiple paragraphs.</blockquote><p>Another paragraph.</p>
+<p>&lt;blockquote class=&quot;cited&quot;&gt;</p>
+<p>Just to cover our bases, make sure a cited blockquote in an update is formatted right too.</p>
+<p>&lt;/blockquote&gt;</p>
+<p>&lt;p class=&quot;cite&quot;&gt;Some Author&lt;/p&gt;</p>
+<p>&lt;/div&gt;</p>
+<h2>Figures</h2>
+<p>Most graphical content is nested inside <code>&lt;figure&gt;</code> tags. It comes in a few forms. First, an image with no caption:</p>
+<p>&lt;figure&gt;   &lt;img class=&quot;framed&quot; src=&quot;/image/2021/07/speed.png&quot;&gt; &lt;/figure&gt;</p>
+<p>The same image with a caption:</p>
+<p>&lt;figure&gt;   &lt;img class=&quot;framed&quot; src=&quot;/image/2021/07/speed.png&quot;&gt;   &lt;figcaption&gt;This is the caption. Captions are always just one paragraph long   to keep things simple. But they can contain &lt;em&gt;emphasis&lt;/em&gt;,   &lt;strong&gt;strong&lt;/strong&gt;, and &lt;code&gt;code&lt;/code&gt;.&lt;/figcaption&gt; &lt;/figure&gt;</p>
+<p>A wide image:</p>
+<p>&lt;figure class=&quot;wide&quot;&gt;   &lt;img class=&quot;framed&quot; src=&quot;/image/2021/07/speed.png&quot;&gt; &lt;/figure&gt;</p>
+<p>A canvas with no caption:</p>
+<p>&lt;figure&gt;   &lt;canvas&gt;There would be content here if the canvas did something.&lt;/canvas&gt; &lt;/figure&gt;</p>
+<p>A canvas with a caption:</p>
+<p>&lt;figure&gt;   &lt;canvas&gt;There would be content here if the canvas did something.&lt;/canvas&gt;   &lt;figcaption&gt;Here is the caption.&lt;/figcaption&gt; &lt;/figure&gt;</p>
+<p>A wide canvas:</p>
+<p>&lt;figure class=&quot;wide&quot;&gt;   &lt;canvas&gt;There would be content here if the canvas did something.&lt;/canvas&gt;   &lt;figcaption&gt;Here is the caption.&lt;/figcaption&gt; &lt;/figure&gt;</p>
+<p>An embedded YouTube video:</p>
+<p>&lt;figure&gt;   &lt;iframe width=&quot;704&quot; height=&quot;396&quot; src=&quot;//www.youtube.com/embed/sb7uzrKnAGA&quot; frameborder=&quot;0&quot; allowfullscreen&gt;&lt;/iframe&gt;   &lt;figcaption&gt;A caption for it.&lt;/figcaption&gt; &lt;/figure&gt; </p>

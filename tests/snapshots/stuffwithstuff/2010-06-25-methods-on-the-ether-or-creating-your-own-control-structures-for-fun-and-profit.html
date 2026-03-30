@@ -1,0 +1,77 @@
+<p>One of my favorite things about [Lisp][</p>
+<p>] and [Smalltalk][</p>
+<p>] is that they don&#x27;t have special syntax for control structures. Sometimes the most elegant way to express a solution to a problem requires a [unique flow control construct][dsl</p>
+<p>]. Beyond that, there&#x27;s something appealingly minimal about a language that doesn&#x27;t have a fixed set of hardcoded magic keywords.</p>
+<p>[lisp]: http://en.wikipedia.org/wiki/Lisp_%28programming_language%29 [smalltalk</p>
+<p>]: http://en.wikipedia.org/wiki/Smalltalk [dsl]: http://en.wikipedia.org/wiki/Domain-specific_language</p>
+<p>Unfortunately, languages like Lisp and Smalltalk that have this feature typically marry it to a syntax that looks strange to the large number of the world&#x27;s programmers who were weaned on C and other curly brace languages. To explore a couple of a ideas, I started tinkering on a little interpreted language called [Finch][</p>
+<p>]. Here, I&#x27;ll try to explain how I addressed the build-your-own-control-flow problem while (I hope) keeping the syntax relatively readable to most people.</p>
+<p>[finch]: https://finch.stuffwithstuff.com/</p>
+<h2>A Smalltalk primer</h2>
+<p>Finch is inspired directly by Smalltalk (by way of [Self][</p>
+<p>]), so it&#x27;ll help to review how Smalltalk handles control flow before we get to Finch. If you know Smalltalk, feel free to skip this.</p>
+<p>[self]: http://en.wikipedia.org/wiki/Self_%28programming_language%29</p>
+<p>Let&#x27;s consider a fairly boring chunk of code in a curly brace language:</p>
+<pre class="c"><code>if (numWeasels &gt; numCakes) {
+  print(&quot;Not enough cakes!&quot;);
+} else {
+  for (int i = 0; i &lt; numWeasels; i++) {
+    print(&quot;A weasel eats a cake!&quot;);
+  }
+}</code></pre>
+<p>We&#x27;ve got three keywords there: <code>if</code>, <code>else</code>, and <code>for</code>. Here&#x27;s how that code would look in Smalltalk:</p>
+<pre class="smalltalk"><code>numWeasels &gt; numCakes ifTrue: [
+  &#x27;Not enough cakes!&#x27; print
+] ifFalse: [
+  i := 0.
+  [ i &lt; numWeasels ] whileTrue: [
+    &#x27;A weasel eats a cake!&#x27; print.
+    i := i + 1
+  ]
+]</code></pre>
+<p>Whoa, what? First, we&#x27;ll gloss over the basic stuff we don&#x27;t care about here: <code>.</code> is used to separate statements, <code>:=</code> is for assignment, and the function (method) comes after the argument instead of before.</p>
+<p>The control flow part of that code is this:</p>
+<pre class="smalltalk"><code>... ifTrue: [
+  ...
+] ifFalse: [
+  [ ... ] whileTrue: [ ... ]
+]</code></pre>
+<p>You may think that all we&#x27;ve done is simple replacement: curlies become square brackets, <code>if</code> becomes <code>ifTrue:</code>, etc. Not so fast. <code>ifTrue:</code>, <code>IfFalse:</code>, and <code>whileTrue:</code> aren&#x27;t reserved words in Smalltalk. They aren&#x27;t special at all, in fact -- you could implement them in Smalltalk itself if you wanted to. In fact, let&#x27;s do that.</p>
+<p>An if/then construct is basically a &quot;procedure&quot; that takes three arguments: a Boolean condition to check, a block of code to execute if the condition is true and (optionally) a block to execute if the condition is false. If you were to declare a &quot;function&quot; for if/then in C, it would look like this:</p>
+<pre class="c"><code>void ifThen(bool condition, Code ifTrue, Code ifFalse);</code></pre>
+<p>The problem, of course, is that Code isn&#x27;t a type in C: there&#x27;s no easy way to pass around a reference to a chunk of code outside of function pointers. Smalltalk doesn&#x27;t have that problem -- it has <em>blocks</em>. That&#x27;s what the square brackets are doing in the original example. They create a block -- a chunk of unevaluated code encapsulated as an object. If you do this:</p>
+<pre class="smalltalk"><code>[ &#x27;hi&#x27; print ]</code></pre>
+<p>It doesn&#x27;t print &quot;hi&quot;. Instead, it creates an object representing that chunk of code. If you then <em>call</em> the block by sending it a <code>value</code> message:</p>
+<pre class="smalltalk"><code>[ &#x27;hi&#x27; print ] value</code></pre>
+<p><em>Then</em> it prints the string. Of course, you don&#x27;t have to call a block immediately, or at all. You can store it in a variable, pass it to another function, call it repeatedly, etc.</p>
+<p>The other piece of syntax to understand is Smalltalk&#x27;s notion of a &quot;keyword&quot;. In most languages, keywords are reserved words built into the language. In Smalltalk, keywords are just another kind of user-defined function like regular method calls or operators. Keywords are identified by ending the name with a colon (<code>:</code>). They&#x27;re used in Smalltalk to send messages to objects with multiple arguments. Where in C you would do <code>AddKeyValue(dictionary, &quot;key&quot;, &quot;value&quot;)</code>, in Smalltalk you&#x27;d say <code>dictionary addKey: &quot;key&quot; value: &quot;value&quot;</code>. In that example, the name of the method is <code>addKey:value:</code>.</p>
+<p>Now we can understand how the original Smalltalk code works. `numWeasels &gt; numCakes<code> is an expression that returns a Boolean value. </code>ifTrue:ifFalse:` is a message then sent to that Boolean. It takes two arguments, a &quot;then&quot; block and an &quot;else&quot; else block. If the Boolean value is true, it evaluates the &quot;then&quot; block, otherwise it evaluates the &quot;else&quot; block. No special syntax required.</p>
+<p>Keywords and blocks are a fantastically powerful system. Blocks may also take arguments and can access variables declared outside of their scopes (i.e. they are [closures][</p>
+<p>]), which means you&#x27;ve got a very simple syntax that lets you create all sorts of control structures and functional idioms like <code>map</code> and <code>filter</code>. It just looks funny.</p>
+<p>[closures]: http://en.wikipedia.org/wiki/Closure_%28computer_science%29</p>
+<h2>Back to Finch</h2>
+<p>I wanted Finch to have that power but look less funny. (According to my definition of &quot;funny&quot;, of course. Smalltalkers think their language looks perfectly normal.) Here&#x27;s how our example looks in Finch:</p>
+<pre class="finch"><code>if: numWeasels &gt; numCakes then: {
+  write: &quot;Not enough cakes!&quot;
+} else: {
+  from: 1 to: numWeasels do: {
+    write: &quot;A weasel eats a cake!&quot;
+  }
+}</code></pre>
+<p>The first minor change is using curlies to define blocks instead of square brackets. The more interesting change is that <code>if:then:else:</code> doesn&#x27;t seem to have a receiver -- an object that the method is acting on.</p>
+<p>You&#x27;ll remember in Smalltalk that the condition <code>numWeasels &gt; numCakes</code> comes <em>before</em> the <code>ifTrue:ifFalse</code> message. That&#x27;s because <code>ifTrue:ifFalse</code> is a method on Boolean objects.</p>
+<p>That&#x27;s a smart solution for Smalltalk, but it seemed strange to me to see the condition first. I think most programmers want to see the keyword to understand what that condition is for before seeing the expression itself. Hence <code>if:</code> comes before <code>numWeasels &gt; numCakes</code>.</p>
+<p>So how do I square that with the fact that Finch is OOP and every method must be a message sent to some receiver?</p>
+<h2>Enter the Ether</h2>
+<p>The answer is... through a little parser trick. If the parser encounters a keyword message before it&#x27;s encountered a receiver to send that message to (i.e. it parses <code>foo: bar</code> instead of <code>obj foo: bar</code> as expected), then it automatically inserts <code>Ether</code> before it. Ether is a special global object that represents the implicit receiver of keyword messages if the receiver is omitted. (In some ways, this is similar to how you can omit <code>this</code> in most OOP languages.)</p>
+<p>When you call <code>if:then:else:</code> in Finch, you&#x27;re sending that message to Ether, which is what handles the message. The result, I think, is a syntax as powerful as Smalltalk, but one that reads more naturally.</p>
+<p>At the same time, we haven&#x27;t given up any of the flexibility of a dynamic OOP language. Ether is just a normal global object, which means you can add your own methods to it as you see fit. This lets you create top-level control structures in Finch that look just like &quot;real&quot; ones.</p>
+<p>For example, the <code>from:to:do:</code> block we saw earlier is actually written in Finch. It uses <code>while:do:</code> which is the only looping construct explicitly built into the interpreter. Its definition is:</p>
+<pre class="finch"><code>Ether :: from: start to: end do: block {
+  i &lt;- start
+  while: { i &lt;= end } do: {
+    block call: i
+    i &lt;-- i + 1
+  }
+}</code></pre>
+<p></p>

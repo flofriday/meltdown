@@ -1,0 +1,81 @@
+<p>If you&#x27;re going down the strange path of building a language that&#x27;s half- dynamic and half-static, one obvious question you have to answer is, &quot;When the hell do I do the type checking?&quot; The general answer is, of course, &quot;after the types are defined, but before the program runs.&quot; This post talks about what I think that means for Magpie.</p>
+<p>To frame the question, lets look at a couple of other languages to see how they work. First, Java, a typical static OOP language:</p>
+<h2>The two languages of Java</h2>
+<p>If you look at a Java source file, there are almost two distinct languages mixed together. Consider this simple program:</p>
+<pre class="java"><code>public class Hello {
+  public static void main() {
+    Hello hello = new Hello();
+    hello.say(&quot;Hello!&quot;);
+  }
+
+  public void say(String greeting) {
+    System.out.println(greeting);
+  }
+}</code></pre>
+<p>At the top level is the language of <em>definitions</em>. This language owns keywords like <code>public</code>, <code>class</code>, and <code>implements</code>. It&#x27;s used for creating types, methods, and fields. It defines the <em>static</em> structure and types of a program.</p>
+<p>Nestled within that inside method bodies is the language of <em>statements</em>. This is what we normally think of as &quot;code&quot; -- the imperative statements that a program executes at runtime.</p>
+<p>In a static language, these two languages are clearly and intentionally separated. This is important because the language of definitions is executed at compile time, and the language of statements is executed at runtime. Clearly delineating them in the code helps the user understand when their code will run.</p>
+<p>Type-checking is straightforward too. The compiler parses each source file, and &quot;executes&quot; the definitions by building an internal symbol table that has the name and definition of each class and method. Once that entire symbol table is built, it then type checks the method bodies (the statements) against what&#x27;s declared in that symbol table.</p>
+<p>After that process has successfully completed, bytecode is generated and the program runs.</p>
+<h2>Everything is imperative</h2>
+<p>In contrast, a dynamic language like Python only has a single language: the language of statements. Consider this little script:</p>
+<pre class="python"><code>class Hello:
+    def say(self, greeting):
+        print greeting
+
+hello = Hello()
+hello.say(&quot;Hello!&quot;)</code></pre>
+<p>It does pretty much the same thing as the Java program, but there&#x27;s an important distinction. Instead of having a special <code>main()</code> method that gets invoked, we just put code at the top-level. Unlike Java, you can put regular statements at the top level of a script -- it has no definition/statement distinction.</p>
+<p>In fact, even the <code>class</code> bit that <em>looks</em> like a definition, is just a statement. It gets executed at runtime to create a class. If we moved the `hello = Hello()<code> line to the top of the script, it wouldn&#x27;t work. The </code>Hello` class would not have been defined <em>yet</em>.</p>
+<p>In a dynamic language, classes and types are just another thing you can create by executing statements, at any point in the life of a program. Since there&#x27;s no type checking anyway, it makes sense to give the user this freedom, even though in practice most classes are created at the top-level in a fairly static fashion.</p>
+<h2>The Magpie answer</h2>
+<p>So now we&#x27;re back to Magpie. Magpie is primarily a dynamic language, so it follows in Python&#x27;s footsteps. There is no special definition/statement dichotomy, and classes are created, extended, and modified imperatively at runtime. This is a valid Magpie program and runs without any type checking:</p>
+<pre class="magpie"><code>class Hello
+end
+
+def Hello say(greeting) print(greeting)
+
+var hello = Hello new
+hello say(&quot;Hello!&quot;)</code></pre>
+<p>If we <em>did</em> want to type check it, only a simple change is needed (in addition to actually adding some type annotations, of course): create a <code>main()</code> function:</p>
+<pre class="magpie"><code>class Hello
+end
+
+def Hello say(greeting String -&gt;) print(greeting)
+
+var main()
+  var hello = Hello new
+  hello say(&quot;Hello!&quot;)
+end</code></pre>
+<p>This program will now type check that the argument you pass to <code>hello()</code> matches the declared type, <code>String</code>. It will do this <em>before</em> <code>main()</code> is called. So the general strategy is, if you want to write a dynamic program, put everything at the top-level. If you want type checking, put all of your definitions at the top-level, and the move the code you want to run after type checking into <code>main()</code>.</p>
+<h2>The evaluation model</h2>
+<p>More precisely, Magpie&#x27;s evaluation model is:</p>
+<p>1.  <strong>Evaluate the scripts dynamically.</strong> The script and any scripts it imports     are executed top-down without any type checking. Magpie is basically a     dynamic language here. (One way to look at Magpie is as a static language     with a <em>really</em> powerful preprocessor.)</p>
+<p>    The assumption is that most of this code will be defining classes, methods,     and functions and binding them to global variables, but you can do anything     you want here, including writing entire programs if you don&#x27;t care to type-     check.</p>
+<p>2.  <strong>Type-check.</strong> Once the interpreter has finished evaluating the scripts, it     looks in the global scope to see if you&#x27;ve defined a function called     <code>main()</code>. Doing so is the trigger that says, &quot;I want to type check.&quot;</p>
+<p>    If it finds <code>main()</code>, the interpreter then type checks everything that&#x27;s     defined in global scope: classes, their methods, and functions. (In other     words, Magpie uses the global scope as the compiler&#x27;s symbol table.) If     there are errors, it prints them out here and stops. Otherwise...</p>
+<p>3.  <strong>Run <code>main()</code>.</strong> Assuming there weren&#x27;t any type errors, now the     interpreter calls <code>main()</code> which can then instantiate classes, call     functions, or do whatever, safe in the knowledge that we won&#x27;t get here     unless all of the type checks passed.</p>
+<h2>What happens if you cheat?</h2>
+<p>Astute readers at this point have noticed a problem. If we can imperatively modify classes at any point, and we can execute any imperative code after type checking, then what&#x27;s to prevent us from modifying a class after it&#x27;s been type checked into something that will no longer work? For example:</p>
+<pre class="magpie"><code>class Foo
+end
+
+Foo bar() print &quot;called bar&quot;
+
+var main(-&gt;)
+  // Break Foo!
+  Foo removeMethod(&quot;bar&quot;)
+
+  // Now try to call it!
+  var foo = Foo new
+  foo bar
+end</code></pre>
+<p>When <code>main()</code> is type checked, <code>Foo</code> has a method called <code>bar</code> so it looks fine. But by the time we get to executing it, we&#x27;ve actually yanked that method out and the call will fail. Uh-oh!</p>
+<p>Thankfully, this isn&#x27;t the end of the world. Because Magpie is dynamic, this won&#x27;t trash memory or go off into the weeds like a static language. You&#x27;ll just get a &quot;method not found&quot; error at runtime.</p>
+<p>But the bigger question is, how should we address this situation? I&#x27;ve got three options I&#x27;m considering:</p>
+<p>1.  <strong>Don&#x27;t worry about it.</strong> This is the current solution. Acknowledge that     users can break things, but trust that they won&#x27;t. This is pretty much how     every dynamic language works, and yet programmers manage to survive.     Magpie&#x27;s philosophy is &quot;better type checking than a dynamic language&quot;, not     &quot;perfect bulletproof type checking&quot;, so this fits.</p>
+<p>2.  <strong>Don&#x27;t allow classes to be modified in ways that can break type checking.</strong>     This is a safer solution that takes a little power from programmers. Magpie     could allow you to add methods to a class, but not <em>remove</em> them once added.     That would ensure that you can&#x27;t imperatively break a class&#x27;s type guarantee     after it&#x27;s been checked.</p>
+<p>3.  <strong>Freeze classes after type checking.</strong> This is the strictest solution. Once     a class has been type checked, mark it as frozen. After that, any attempts     to modify it at runtime would fail. You could create new unfrozen classes     after type checking, but everything that&#x27;s gone through the checker gets     locked down.</p>
+<p>I&#x27;m leaning towards the first option because it&#x27;s simplest and most flexible, but I&#x27;m open to thoughts one way or the other.</p>
+<h2>Thoughts?</h2>
+<p>So that&#x27;s what I came up with. The code that&#x27;s structured like a dynamic language runs dynamically. The code that&#x27;s called from <code>main()</code> runs after type checking like a static language. The implementation is still very rough, but it seems to actually kind of work, strangely enough. </p>

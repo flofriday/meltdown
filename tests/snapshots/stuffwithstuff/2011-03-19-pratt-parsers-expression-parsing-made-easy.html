@@ -1,0 +1,254 @@
+<p>Every now and then, I stumble onto some algorithm or idea that&#x27;s so clever and such a perfect solution to a problem that I feel like I got smarter or gained [a new superpower][xkcd</p>
+<p>] just by learning it. [Heaps][</p>
+<p>] were one, just about the only thing I got out of my truncated CS education. I recently stumbled onto another: [Pratt][</p>
+<p>] or &quot;top-down operator precedence&quot; parsers.</p>
+<p>[xkcd]: http://xkcd.com/208/ [heaps</p>
+<p>]: http://en.wikipedia.org/wiki/Heap_%28data_structure%29 [pratt]: http://en.wikipedia.org/wiki/Vaughan_Pratt</p>
+<p>When you&#x27;re writing a parser, [recursive descent][</p>
+<p>] is as easy as spreading peanut butter. It excels when you can figure out what to parse based on the next bit of code you&#x27;re looking at. That&#x27;s usually true at the declaration and statement levels of a language&#x27;s grammar since most syntax there starts with keywords -- <code>class</code>, <code>if</code>, <code>for</code>, <code>while</code>, etc.</p>
+<p>[recursive descent]: http://en.wikipedia.org/wiki/Recursive_descent</p>
+<p>Parsing gets trickier when you get to expressions. When it comes to infix operators like <code>+</code>, postfix ones like <code>++</code>, and even mixfix expressions like <code>?:</code>, it can be hard to tell what kind of expression you&#x27;re parsing until you&#x27;re halfway through it. You <em>can</em> do this with recursive descent, but it&#x27;s a chore. You have to write separate functions for each level of precedence (JavaScript has 17 of them, for example), manually handle associativity, and smear your grammar across a bunch of parsing code until it&#x27;s hard to see.</p>
+<h2>Peanut butter and jelly, the secret weapon</h2>
+<p>Pratt parsing solves that. If recursive descent is peanut butter, Pratt parsing is the jelly. When you mix the two together, you get a simple, terse, readable parser that can handle any grammar you throw at it.</p>
+<p>Pratt&#x27;s technique for handling operator precedence and infix expressions is so simple and effective it&#x27;s a mystery why almost no one knows about it. After the seventies, top down operator precedence parsers seem to have fallen off the Earth. Douglas Crockford&#x27;s [JSLint][</p>
+<p>] uses one to [parse JavaScript][js</p>
+<p>], but his treatment is one of the [very few][crockford</p>
+<p>] remotely modern articles about it.</p>
+<p>[jslint]: http://www.jslint.com/ [js</p>
+<p>]: http://crockford.com/javascript/tdop/tdop.html [crockford]: http://effbot.org/zone/simple-top-down-parsing.htm</p>
+<p>Part of the problem, I think, is that Pratt&#x27;s terminology is opaque, and Crockford&#x27;s article is itself rather murky. Pratt uses terms like &quot;null denominator&quot; and Crockford mixes in extra stuff like tracking lexical scope that obscures the core idea.</p>
+<p>This is where I come in. I won&#x27;t do anything revolutionary. I&#x27;ll just try to get the core concepts behind top down operator precedence parsers and present them as clearly as I can. I&#x27;ll switch out some terms to (I hope) clarify things. Hopefully I won&#x27;t offend anyone&#x27;s purist sensibilities. I&#x27;ll be coding in Java, the vulgar Latin of programming languages. I figure if you can write it in Java, you can write it in anything.</p>
+<h2>What we&#x27;ll be making</h2>
+<p>I&#x27;m a learn-by-doing person, which means I&#x27;m also a teach-by-doing one. So to show how Pratt parsers work, we&#x27;ll build a parser for a [tiny little toy language called <em>Bantam</em>][bantam</p>
+<p>]. The language only has expressions since that&#x27;s where Pratt parsing is really helpful, but that should be enough to convince you of its usefulness.</p>
+<p>[bantam]: https://github.com/munificent/bantam</p>
+<p>Even though Bantam is simple, it has a full gamut of operators: prefix (<code>+</code>, <code>-</code>, <code>~</code>, <code>!</code>), postfix (<code>!</code>), infix (<code>+</code>, <code>-</code>, <code>*</code>, <code>/</code>, <code>^</code>), and even a mixfix conditional operator (<code>?:</code>). It has multiple precedence levels and both right and left associative operators. It also has assignment, function calls and parentheses for grouping. If we can parse this, we can parse anything.</p>
+<h2>What we&#x27;ll start with</h2>
+<p>All we care about is parsing, so we&#x27;ll ignore the tokenizing phase. I slapped together [a crude lexer][lexer</p>
+<p>] that works and we&#x27;ll just pretend that tokens are raining down from heaven or something.</p>
+<p>[lexer]: https://github.com/munificent/bantam/blob/master/src/com/stuffwithstuff/bantam/Lexer.java</p>
+<p>A token is the smallest chunk of meaningful code. It has a type and a string associated with it. Given <code>from + offset(time)</code>, the tokens would be:</p>
+<pre class="text"><code>NAME &quot;from&quot;
+PLUS &quot;+&quot;
+NAME &quot;offset&quot;
+LEFT_PAREN &quot;(&quot;
+NAME &quot;time&quot;
+RIGHT_PAREN &quot;)&quot;</code></pre>
+<p>For this exercise, we won&#x27;t be <em>interpreting</em> or <em>compiling</em> this code. We just want to parse it to a nice data structure. For our purposes, that means our parser should chew up a bunch of [Token][token</p>
+<p>] objects and spit out an instance of some class that implements [Expression][expression</p>
+<p>]. To give you an idea, here&#x27;s a simplified version of the class for a [conditional expression][cond</p>
+<p>]:</p>
+<p>[token]: https://github.com/munificent/bantam/blob/master/src/com/stuffwithstuff/bantam/Token.java [expression</p>
+<p>]: https://github.com/munificent/bantam/blob/master/src/com/stuffwithstuff/bantam/expressions/Expression.java [cond]: https://github.com/munificent/bantam/blob/master/src/com/stuffwithstuff/bantam/expressions/ConditionalExpression.java</p>
+<pre class="java"><code>class ConditionalExpression implements Expression {
+  public ConditionalExpression(
+      Expression condition,
+      Expression thenArm,
+      Expression elseArm) {
+    this.condition = condition;
+    this.thenArm   = thenArm;
+    this.elseArm   = elseArm;
+  }
+
+  public final Expression condition;
+  public final Expression thenArm;
+  public final Expression elseArm;
+}</code></pre>
+<p>(You gotta love Java&#x27;s &quot;please sign it in quadruplicate&quot; level of bureaucracy here. Like I said, if you can tolerate this in Java, it can work in <em>any</em> language.)</p>
+<p>We&#x27;ll start from a simple [Parser][parser</p>
+<p>] class. The parser owns the token stream, handles lookahead and provides the basic methods you need to write a top-down recursive descent parser with a single token of lookahead (it&#x27;s [LL(1)]). This is enough to get us going. If we need more later, it&#x27;s easy to extend it.</p>
+<p>[parser]: https://github.com/munificent/bantam/blob/master/src/com/stuffwithstuff/bantam/Parser.java [ll(1)</p>
+<p>]: https://en.wikipedia.org/wiki/LL_parser</p>
+<p>OK, let&#x27;s build ourselves a parser!</p>
+<h2>First things first</h2>
+<p>Even though a &quot;full&quot; Pratt parser is pretty tiny, I found it to be hard to decipher. Sort of like [quicksort][</p>
+<p>], the implementation is a deceptively simple handful of deeply intertwined code. To untangle it, we&#x27;ll build it up one tiny step at a time.</p>
+<p>[quicksort]: http://en.wikipedia.org/wiki/Quicksort</p>
+<p>The simplest expressions to parse are prefix operators and single-token expressions. For those, the current token tells us everything we need to do. Bantam has one single-token expression: named variables. It has four prefix operators: <code>+</code>, <code>-</code>, <code>~</code>, and <code>!</code>. The simplest possible code to parse those is:</p>
+<pre class="java"><code>Expression parseExpression() {
+  if (match(TokenType.NAME))       // Return NameExpression...
+  else if (match(TokenType.PLUS))  // Return prefix + operator...
+  else if (match(TokenType.MINUS)) // Return prefix - operator...
+  else if (match(TokenType.TILDE)) // Return prefix ~ operator...
+  else if (match(TokenType.BANG))  // Return prefix ! operator...
+  else throw new ParseException();
+}</code></pre>
+<p>But that&#x27;s a bit monolithic. As you can see, we&#x27;re switching off of a TokenType to branch to different parsing behavior. Let&#x27;s encode that directly by making a Map from TokenTypes to chunks of parsing code. We&#x27;ll call these chunks &quot;parselets&quot;, and they will implement this:</p>
+<pre class="java"><code>interface PrefixParselet {
+  Expression parse(Parser parser, Token token);
+}</code></pre>
+<p>An parselet implementation to parse variable names is simply:</p>
+<pre class="java"><code>class NameParselet implements PrefixParselet {
+  public Expression parse(Parser parser, Token token) {
+    return new NameExpression(token.getText());
+  }
+}</code></pre>
+<p>We can use a single class for all of the prefix operators since they only differ in the actual operator token itself:</p>
+<pre class="java"><code>class PrefixOperatorParselet implements PrefixParselet {
+  public Expression parse(Parser parser, Token token) {
+    Expression operand = parser.parseExpression();
+    return new PrefixExpression(token.getType(), operand);
+  }
+}</code></pre>
+<p>You&#x27;ll note that it calls back into <code>parseExpression()</code> to parse the operand that appears after the operator (for example, to parse the <code>a</code> in <code>-a</code>). This recursion takes care of nested operators like <code>-+~!a</code>.</p>
+<p>Back in Parser, the chained <code>if</code> statements are replaced with a map:</p>
+<pre class="java"><code>class Parser {
+  public Expression parseExpression() {
+    Token token = consume();
+    PrefixParselet prefix = mPrefixParselets.get(token.getType());
+
+    if (prefix == null) throw new ParseException(
+        &quot;Could not parse \&quot;&quot; + token.getText() + &quot;\&quot;.&quot;);
+
+    return prefix.parse(this, token);
+  }
+
+  // Other stuff...
+
+  private final Map&lt;TokenType, PrefixParselet&gt; mPrefixParselets =
+      new HashMap&lt;TokenType, PrefixParselet&gt;();
+}</code></pre>
+<p>To define the grammar we have so far -- variables and the four prefix operators -- we&#x27;ll add these helper methods:</p>
+<pre class="java"><code>public void register(TokenType token, PrefixParselet parselet) {
+  mPrefixParselets.put(token, parselet);
+}
+
+public void prefix(TokenType token) {
+  register(token, new PrefixOperatorParselet());
+}</code></pre>
+<p>And now we can define the grammar like:</p>
+<pre class="java"><code>register(TokenType.NAME, new NameParselet());
+prefix(TokenType.PLUS);
+prefix(TokenType.MINUS);
+prefix(TokenType.TILDE);
+prefix(TokenType.BANG);</code></pre>
+<p>This is already an improvement over a recursive descent parser because our grammar is now more declarative instead of being spread out over a few imperative functions, and we can see the actual grammar all in one place. Even better, we can extend the grammar just by registering new parselets. We don&#x27;t have to change the Parser class itself.</p>
+<p>If we <em>only</em> had prefix expressions, we&#x27;d be done now. Alas, we don&#x27;t.</p>
+<h2>Stuck in the middle</h2>
+<p>What we have so far only works if the <em>first</em> token tells us what kind of expression we&#x27;re parsing, but that isn&#x27;t always the case. With an expression like <code>a + b</code>, we don&#x27;t know we have an add expression until after we parse the <code>a</code> and get to <code>+</code>. We have to extend the parser to support that.</p>
+<p>Fortunately, we&#x27;re in a good place to do so. Our current <code>parseExpression()</code> method parses a complete prefix expression including any nested prefix expressions and then stops. So, if we throw this at it:</p>
+<pre class="java"><code>-a + b</code></pre>
+<p>It will parse <code>-a</code> and leave us sitting on <code>+</code>. That&#x27;s exactly the token we need to tell what infix expression we need to parse. Compared to prefix parsing, the only change for infix parsing is that there&#x27;s another expression <em>before</em> the infix operator that the infix parser receives as an argument. Let&#x27;s define a parselet that supports that:</p>
+<pre class="java"><code>interface InfixParselet {
+  Expression parse(Parser parser, Expression left, Token token);
+}</code></pre>
+<p>The only difference is that <code>left</code> argument, which is the expression we parsed before we got to the infix token. We wire this up to our parser by having another table of infix parselets.</p>
+<p>Having separate tables for prefix and infix expressions is important because we sometimes have both a prefix and infix parselet for the same TokenType. For example, the prefix parselet for <code>(</code> handles grouping in an expression like `a * (b + c)<code>. Meanwhile, the *infix* parselet for </code>(` handles function calls like <code>a(b)</code>.</p>
+<p>Now, after we parse the leading prefix expression, we look for an infix parser that matches the next token and wraps the prefix expression as an operand:</p>
+<pre class="java"><code>class Parser {
+  public void register(TokenType token, InfixParselet parselet) {
+    mInfixParselets.put(token, parselet);
+  }
+
+  public Expression parseExpression() {
+    Token token = consume();
+    PrefixParselet prefix = mPrefixParselets.get(token.getType());
+
+    if (prefix == null) throw new ParseException(
+        &quot;Could not parse \&quot;&quot; + token.getText() + &quot;\&quot;.&quot;);
+
+    Expression left = prefix.parse(this, token);
+
+    token = lookAhead(0);
+    InfixParselet infix = mInfixParselets.get(token.getType());
+
+    // No infix expression at this point, so we&#x27;re done.
+    if (infix == null) return left;
+
+    consume();
+    return infix.parse(this, left, token);
+  }
+
+  // Other stuff...
+
+  private final Map&lt;TokenType, InfixParselet&gt; mInfixParselets =
+      new HashMap&lt;TokenType, InfixParselet&gt;();
+}</code></pre>
+<p>Pretty straightforward. We can implement an infix parselet for binary arithmetic operators like <code>+</code> like so:</p>
+<pre class="java"><code>class BinaryOperatorParselet implements InfixParselet {
+  public Expression parse(Parser parser,
+      Expression left, Token token) {
+    Expression right = parser.parseExpression();
+    return new OperatorExpression(left, token.getType(), right);
+  }
+}</code></pre>
+<p>Infix parselets also works for postfix operators. I&#x27;m calling them &quot;infix&quot;, but they&#x27;re really &quot;anything but prefix&quot;. If there&#x27;s some leading subexpression that comes before the token, the token will be handled by an infix parselet. That includes postfix expressions and mixfix ones like <code>?:</code>.</p>
+<p>Postfix expressions are as simple as single-token prefix parselets: they just take the <code>left</code> operand and wraps it in another expression:</p>
+<pre class="java"><code>class PostfixOperatorParselet implements InfixParselet {
+  public Expression parse(Parser parser, Expression left,
+      Token token) {
+    return new PostfixExpression(left, token.getType());
+  }
+}</code></pre>
+<p>Mixfix is easy too. It&#x27;s similar to recursive descent:</p>
+<pre class="java"><code>class ConditionalParselet implements InfixParselet {
+  public Expression parse(Parser parser, Expression left,
+      Token token) {
+    Expression thenArm = parser.parseExpression();
+    parser.consume(TokenType.COLON);
+    Expression elseArm = parser.parseExpression();
+
+    return new ConditionalExpression(left, thenArm, elseArm);
+  }
+}</code></pre>
+<p>Now we can parse prefix, postfix, infix, and even mixfix expressions. With a pretty small amount of code, we can parse complex nested expressions like `a + (b ? c! : -d)`. We&#x27;re done, right? Well... almost.</p>
+<h2>Excuse you, aunt Sally</h2>
+<p>Our parser <em>can</em> parse all of this stuff, but it doesn&#x27;t parse it with the right precedence or associativity. If you throw <code>a - b - c</code> at the parser, it will parse the nested expressions like <code>a - (b - c)</code>, which isn&#x27;t right. (Well, actually it is <em>right</em> -- associative that is. We need it to be <em>left</em>.)</p>
+<p>And this <em>last</em> step where we fix that is where Pratt parsers go from pretty nice to totally radical. We&#x27;ll make two simple changes. We extend <code>parseExpression()</code> to take a <em>precedence</em> -- a number that tells which expressions can be parsed by that call. If <code>parseExpression()</code> encounters an expression whose precedence is lower than we allow, it stops parsing and returns what it has so far.</p>
+<p>To make that check we need to know the precedence of any given infix expression. We&#x27;ll let the parselet specify it:</p>
+<pre class="java"><code>public interface InfixParselet {
+  Expression parse(Parser parser, Expression left, Token token);
+  int getPrecedence();
+}</code></pre>
+<p>Using that, our core expression parser looks like this:</p>
+<pre class="java"><code>public Expression parseExpression(int precedence) {
+  Token token = consume();
+  PrefixParselet prefix = mPrefixParselets.get(token.getType());
+
+  if (prefix == null) throw new ParseException(
+      &quot;Could not parse \&quot;&quot; + token.getText() + &quot;\&quot;.&quot;);
+
+  Expression left = prefix.parse(this, token);
+
+  while (precedence &lt; getPrecedence()) {
+    token = consume();
+
+    InfixParselet infix = mInfixParselets.get(token.getType());
+    left = infix.parse(this, left, token);
+  }
+
+  return left;
+}</code></pre>
+<p>That relies on a tiny helper function to get the precedence of the current token or a default value if there&#x27;s no infix parselet for the token:</p>
+<pre class="java"><code>private int getPrecedence() {
+  InfixParselet parser = mInfixParselets.get(
+      lookAhead(0).getType());
+  if (parser != null) return parser.getPrecedence();
+
+  return 0;
+}</code></pre>
+<p>And that&#x27;s it. To wire precedence into Bantam&#x27;s grammar, we set up a little precedence table:</p>
+<pre class="java"><code>public class Precedence {
+  public static final int ASSIGNMENT  = 1;
+  public static final int CONDITIONAL = 2;
+  public static final int SUM         = 3;
+  public static final int PRODUCT     = 4;
+  public static final int EXPONENT    = 5;
+  public static final int PREFIX      = 6;
+  public static final int POSTFIX     = 7;
+  public static final int CALL        = 8;
+}</code></pre>
+<p>To make our operators parse their operands with the correct precedence, they pass an appropriate value back into <code>parseExpression()</code> when they call it recursively. For example, the [BinaryOperatorParselet][</p>
+<p>] instance that handles the <code>+</code> operator passes in <code>Precedence.SUM</code> when it parses its right-hand operand.</p>
+<p>[binaryoperatorparselet]: https://github.com/munificent/bantam/blob/master/src/com/stuffwithstuff/bantam/parselets/BinaryOperatorParselet.java</p>
+<p>Associativity is easy too. If an infix parselet calls <code>parseExpression()</code> with the <em>same</em> precedence that it returns for its own <code>getPrecedence()</code> call, you get left associativity. To be right-associative, it just needs to pass in <em>one less</em> than that instead.</p>
+<h2>Go forth and multiply</h2>
+<p>I&#x27;ve rewritten the [parser for Magpie][magpie parser</p>
+<p>] using this and it worked like a charm. I&#x27;m also working on a JavaScript parser using this technique and again it&#x27;s been a great fit.</p>
+<p>[magpie parser]: https://github.com/munificent/magpie/blob/master/src/com/stuffwithstuff/magpie/parser/MagpieParser.java</p>
+<p>I Pratt parsers to be simple, terse, extensible (Magpie, for example, uses this to [let you extend its own syntax][extend</p>
+<p>] at runtime), and easy to read. I&#x27;m at the point where I can&#x27;t imagine writing a parser any other way. I never thought I&#x27;d say this, but parsers feel easy now.</p>
+<p>[extend]: /2011/02/13/extending-syntax-from-within-a-language/</p>
+<p>To see for yourself, just take a look at [the complete program][bantam</p>
+<p>].</p>
+<p>&lt;div class=&quot;update&quot;&gt; &lt;p&gt;&lt;em&gt;Update 2022/05/14:&lt;/em&gt; John Cardinal has   &lt;a href=&quot;https://github.com/jfcardinal/BantamCs&quot;&gt;ported the code to C#&lt;/a&gt;.&lt;/p&gt; &lt;/div&gt; </p>

@@ -1,0 +1,279 @@
+<p>&lt;div class=&quot;update&quot;&gt; &lt;p&gt;&lt;em&gt;Update 2021/09/22:&lt;/em&gt; C# got support for default parameters in 4.0.&lt;/p&gt; &lt;/div&gt;</p>
+<p>C# [lacks default parameters][</p>
+<p>]. The C# answer to default params is overloaded methods. With a lot of options, this can quickly [scale to hell][hell</p>
+<p>]. Even if it had default parameters, they are pretty limited too. This post talks a bit about a couple of other solutions I found to the problem that avoid the combinatorial sea of overloads.</p>
+<p>[lacks default parameters]: https://docs.microsoft.com/en-us/archive/blogs/csharpfaq/does-c-have-default-parameters [hell</p>
+<p>]: http://msdn2.microsoft.com/en-us/library/system.drawing.graphics.drawimage.aspx</p>
+<h2>The problem</h2>
+<p>For kicks, I wrote a little [curses][</p>
+<p>]-like terminal library in C#. It only really has a few core methods: <code>Write()</code> for writing text, <code>Fill()</code> to fill in a space, and <code>Draw()</code> to draw lines and boxes using awesome ASCII lines. The tricky part is that each of those can take a bunch of different parameters. For our talk, we&#x27;ll simplify it down:</p>
+<p>[curses]: http://en.wikipedia.org/wiki/Curses_(programming_library)</p>
+<p>1.  <strong>Position:</strong> You can specify where on the screen to write using a <code>Point</code>,     x and y coordinates, or not at all to write at the current cursor position.</p>
+<p>2.  <strong>Color:</strong> You can specify both the fore- and background color, just the     foreground color, or neither to use the current colors.</p>
+<p>And that&#x27;s it. Three methods, and two kinds of parameters with three options each.</p>
+<h2>Overloads: the vanilla solution</h2>
+<p>So the normal way to address this is by overloading <code>Write()</code>, <code>Fill()</code>, and <code>Draw()</code>. If we go with the vanilla overload solution, we have 27 overloaded methods to implement every combination. Using the code looks like this:</p>
+<pre class="csharp"><code>Terminal terminal = new Terminal();
+
+terminal.Write(&quot;foo&quot;);
+terminal.Fill(1, 2, Color.Red);
+terminal.Draw(Color.Green, Color.Blue);</code></pre>
+<p>Not bad. But implementing it looks like:</p>
+<pre class="csharp"><code>public class Terminal
+{
+    public void Write(Point pos, Color fore, Color back,
+        string text) { ... }
+    public void Write(int x, int y, Color fore, Color back,
+        string text) { ... }
+    public void Write(Color fore, Color back, string text) { ... }
+
+    public void Write(Point pos, Color fore, string text) { ... }
+    public void Write(int x, int y, Color fore, string text) { ... }
+    public void Write(Color fore, string text) { ... }
+
+    public void Write(Point pos, string text) { ... }
+    public void Write(int x, int y, string text) { ... }
+    public void Write(string text) { ... }
+
+    public void Fill(Point pos, Color fore, Color back) { ... }
+    public void Fill(int x, int y, Color fore, Color back) { ... }
+    public void Fill(Color fore, Color back) { ... }
+
+    public void Fill(Point pos, Color fore) { ... }
+    public void Fill(int x, int y, Color fore) { ... }
+    public void Fill(Color fore) { ... }
+
+    public void Fill(Point pos) { ... }
+    public void Fill(int x, int y) { ... }
+    public void Fill() { ... }
+
+    public void Draw(Point pos, Color fore, Color back) { ... }
+    public void Draw(int x, int y, Color fore, Color back) { ... }
+    public void Draw(Color fore, Color back) { ... }
+
+    public void Draw(Point pos, Color fore) { ... }
+    public void Draw(int x, int y, Color fore) { ... }
+    public void Draw(Color fore) { ... }
+
+    public void Draw(Point pos) { ... }
+    public void Draw(int x, int y) { ... }
+    public void Draw() { ... }
+}</code></pre>
+<p>Lame! Worse, if you start adding more options, it goes up combinatorially. 27 is just for our <em>toy</em> terminal. For my actual terminal lib, it would take <em>324</em> overloaded methods to support every combination. There has to be a better way.</p>
+<h2>Variable argument lists: who needs strong typing anyway?</h2>
+<p>It&#x27;s true that C# doesn&#x27;t support default parameters, but it <em>does</em> support variable length argument lists. Maybe that&#x27;s a solution that lets us pass in a variety of options without having to overload. Calling it still looks like:</p>
+<pre class="csharp"><code>Terminal terminal = new Terminal();
+
+terminal.Write(&quot;foo&quot;);
+terminal.Fill(1, 2, Color.Red);
+terminal.Draw(Color.Green, Color.Blue);</code></pre>
+<p>But the class itself just looks like:</p>
+<pre class="csharp"><code>public class Terminal
+{
+    public void Write(string text, params object[] options) { ... }
+    public void Fill(params object[] options) { ... }
+    public void Draw(params object[] options) { ... }
+}</code></pre>
+<p>That doesn&#x27;t look so bad. Except when you try to implement one of the methods:</p>
+<pre class="csharp"><code>public void Write(string text, params object[] options)
+{
+    Point pos = mCurrentPos;
+    Color? foreColor = null;
+    Color? backColor = null;
+    int? x = null;
+    int? y = null;
+
+    foreach (object obj in options)
+    {
+        if (obj is Point)
+        {
+            pos = (Point)obj;
+        }
+        else if (obj is Color)
+        {
+            if (foreColor == null) foreColor = (Color)obj;
+            else backColor = (Color)obj;
+        }
+        else if (obj is int)
+        {
+            if (x == null) x = (int)obj;
+            else y = (int)obj;
+        }
+    }
+
+    if (x == null) x = mCurrentX;
+    if (y == null) y = mCurrentY;
+
+    // write using pos, color, etc.
+}</code></pre>
+<p>That&#x27;s… just… no. And that doesn&#x27;t even have any error handling. The following is totally valid:</p>
+<pre class="csharp"><code>terminal.Write(&quot;foo&quot;, 17, Color.White, Color.Aqua,
+    Color.Beige, &quot;wtf?&quot;);</code></pre>
+<p>OK, scratch that.</p>
+<h2>Parameter object: strong typing is strong</h2>
+<p>So we know we want strong typing. How about if we bundle all of the parameters into a parameter object? This is basically the [<code>ProcessStartInfo</code>][proc</p>
+<p>] solution.</p>
+<p>[proc]: https://docs.microsoft.com/en-us/dotnet/api/system.diagnostics.processstartinfo</p>
+<p>We define a class something like:</p>
+<pre class="csharp"><code>public class TerminalParams
+{
+    // Nullable so that null = default value.
+    public Point? Pos;
+    public Color? Fore;
+    public Color? Back;
+}</code></pre>
+<p>And our <code>Terminal</code> looks something like:</p>
+<pre class="csharp"><code>public class Terminal
+{
+    public void Write(TerminalParams paramObj, string text) { ... }
+    public void Fill(TerminalParams paramObj) { ... }
+    public void Draw(TerminalParams paramObj) { ... }
+}</code></pre>
+<p>In C# 3.0 with [object initializers][</p>
+<p>], we can call it something like:</p>
+<p>[object initializers]: http://weblogs.asp.net/scottgu/archive/2007/03/08/new-c-orcas-language-features-automatic-properties-object-initializers-and-collection-initializers.aspx</p>
+<pre class="csharp"><code>Terminal terminal = new Terminal();
+
+terminal.Write(new TerminalParams(), &quot;foo&quot;);
+terminal.Fill(new TerminalParams
+        { Pos = new Point(1, 2), Fore = Color.Red });
+terminal.Draw(new TerminalParams
+        { Fore = Color.Green, Back = Color.Blue });</code></pre>
+<p>I won&#x27;t say that&#x27;s the greatest thing ever, but it&#x27;s not too bad. Of course, if you&#x27;re not on 3.0 yet, you&#x27;re up a creek. All you&#x27;ve basically accomplished is moved your overloads to constructor overloads in <code>TerminalParams</code>. And I still think there&#x27;s a little too much… junk… in those lines of code. The `new TerminalParams {<code> and </code>new Point(...)` parts don&#x27;t really add any value.</p>
+<h2>Parameter groups</h2>
+<p>Really, the overloaded methods do have the best <em>calling convention</em> so far. Let&#x27;s look at it a little closer:</p>
+<pre class="csharp"><code>terminal.Write(1, 2, Color.Blue, Color.Red, &quot;foo&quot;);</code></pre>
+<p>While that&#x27;s an uninterrupted list of parameters, they&#x27;re conceptually grouped like this:</p>
+<pre class="csharp"><code>terminal.Write(    1, 2, Color.Blue, Color.Red, &quot;foo&quot;);
+//             ^^^^^^^^  ^^^^^^^^^^^^^^^^^^^^^  ^^^^
+//             Position  Color                  Text</code></pre>
+<p>How cool would it be if we could actually group the parameters like that in the code? Something like:</p>
+<pre class="csharp"><code>terminal.Write(1, 2)(Color.Blue, Color.Red)(&quot;foo&quot;);</code></pre>
+<p>C# doesn&#x27;t have functors, but maybe we&#x27;re on to something.</p>
+<p><em>Insert several hours of mucking around with properties that return delegates that return delegates, etc.</em></p>
+<p>Or… not. But let&#x27;s not give up yet. Let&#x27;s try re-arranging things:</p>
+<pre class="csharp"><code>terminal.Write(&quot;foo&quot;)(1, 2)(Color.Blue, Color.Red);</code></pre>
+<p>This is a little better because it puts the method (<code>Write()</code>) next to the one parameter it really needs, the string. The problem is that that line, if it were possible to write, would execute from left to right. So we would have to write before we looked at the parameters.</p>
+<p>Let&#x27;s do some more shuffling:</p>
+<pre class="csharp"><code>terminal(1, 2)(Color.Blue, Color.Red).Write(&quot;foo&quot;);</code></pre>
+<p>This looks promising, but we&#x27;re stuck with the fact that C# doesn&#x27;t have functors. We can&#x27;t do <code>terminal()</code>. Is there anything that sort of <em>looks</em> like <code>()</code>?</p>
+<h2>You&#x27;re using what?!</h2>
+<p>So the question is, &quot;what kind of grouping construct can we define at the object level?&quot; Astute readers are already thinking it: <em>indexers</em>. Right now, some of you may be shuddering in horror at the weirdness we&#x27;re about to unleash, but let&#x27;s do it anyway. Can we make all of these lines of code work:</p>
+<pre class="csharp"><code>terminal.Write(&quot;foo&quot;);
+terminal[new Point(3, 4)].Write(&quot;foo&quot;);
+terminal[1, 2][Color.Red].Write(&quot;foo&quot;);
+terminal[Color.Brown].Write(&quot;foo&quot;);
+terminal[Color.Green, Color.Blue].Draw();</code></pre>
+<p>And can we make them work all at the same time? Not only that, can we make the following <em>not</em> work:</p>
+<pre class="csharp"><code>// Bad, cannot specify position twice.
+terminal[1, 2][new Point(3, 4)].Write(&quot;foo&quot;);
+
+// Bad, cannot specify half a position.
+terminal[1].Write(&quot;foo&quot;);
+
+// Sorta bad, for consistency would always like
+// to have position before color.
+terminal[Color.Brown][1, 2].Write(&quot;foo&quot;);</code></pre>
+<p>It turns out, we can. The core idea is to define a chain of interfaces that inherit from each other.</p>
+<pre class="csharp"><code>public interface ITerminalMethods
+{
+    void Write(string text);
+    void Fill();
+    void Draw();
+}
+
+public interface ITerminalColor : ITerminalMethods
+{
+    ITerminalMethods this[Color fore] { get; }
+    ITerminalMethods this[Color fore, Color back] { get; }
+}
+
+public interface ITerminalPosColor : ITerminalColor
+{
+    ITerminalColor this[Point pos] { get; }
+    ITerminalColor this[int x, int y] { get; }
+}
+
+public interface ITerminal : ITerminalPosColor { }</code></pre>
+<p>Each one represents one of the parameter types: position, color, etc. The innermost one, <code>ITerminalMethods</code>, contains the actual methods, <code>Write()</code>, <code>Fill()</code>, etc.</p>
+<p>The other interfaces define indexers for each parameter type that return the next interface up the chain. The position interface, <code>ITerminalPosColor</code>, has indexers that return the color interface, <code>ITerminalColor</code>, which has indexers which return the method interface, <code>ITerminalMethods</code>. Since the interfaces inherit from each other too, you can also skip a step. You can go from <code>ITerminalPosColor</code> straight to <code>ITerminalMethods</code> because <code>ITerminalColor</code> interface inherits from it.</p>
+<p>Calling it looks like:</p>
+<pre class="csharp"><code>terminal.Write(&quot;foo&quot;);
+terminal[new Point(3, 4)].Write(&quot;foo&quot;);
+terminal[1, 2][Color.Red].Write(&quot;foo&quot;);
+terminal[Color.Brown].Write(&quot;foo&quot;);
+terminal[Color.Green, Color.Blue].Draw();</code></pre>
+<p>This is all well and good for <em>defining</em> it, but is it possible to actually <em>implement</em> this thing?</p>
+<p>We can do that too. The idea is that the Terminal class really contains two kinds of state: the core &quot;set of characters on screen&quot; state and the ephemeral state that can be overridden by these indexers -- current color and position. We let a Terminal create a shallow clone of itself that <em>shares</em> the core state, but has a <em>copy</em> of the ephemeral state that can be changed. All of the indexers create new Terminals that write to the same core terminal data but keep their own copy of the position and color. Like so:</p>
+<pre class="csharp"><code>public class TerminalData
+{
+    // Terminal core state:
+    public char[] Characters;
+    public Color[] ForeColors;
+    public Color[] BackColors;
+}
+
+public class Terminal : ITerminal
+{
+    public Terminal() { mData = new TerminalData(); }
+
+    #region ITerminalPosColor Members
+
+    public ITerminalColor this[Point pos]
+    {
+        get { return new Terminal(mData, pos, mFore, mBack); }
+    }
+
+    public ITerminalColor this[int x, int y]
+    {
+        get { return new Terminal(mData,
+            new Point(x, y), mFore, mBack); }
+    }
+
+    #endregion
+
+    #region ITerminalColor Members
+
+    public ITerminalMethods this[Color fore]
+    {
+        get { return new Terminal(mData, mPos, fore, mBack); }
+    }
+
+    public ITerminalMethods this[Color fore, Color back]
+    {
+        get { return new Terminal(mData, mPos, fore, back); }
+    }
+
+    #endregion
+
+    #region ITerminalMethods Members
+
+    public void Write(string text) { ... }
+    public void Fill() { ... }
+    public void Draw() { ... }
+
+    #endregion
+
+    private Terminal(TerminalData data, Point pos,
+        Color fore, Color back)
+    {
+        mData = data;
+        mPos  = pos;
+        mFore = fore;
+        mBack = back;
+    }
+
+    private TerminalData mData;
+
+    // Ephemeral state:
+    private Point mPos;
+    private Color mFore;
+    private Color mBack;
+}</code></pre>
+<h2>Is it worth doing?</h2>
+<p>So this is how [my little terminal library][malison</p>
+<p>] works, and I&#x27;ve grown pretty fond of it. However, this is a personal project, so my willingness to deal with very idiomatically strange code is pretty high. (Ask me about [<code>NotNull&lt;T&gt;</code>][nullable</p>
+<p>] sometime.)</p>
+<p>[malison]: https://github.com/munificent/malison-dotnet/blob/master/Malison.Core/ITerminal.cs [nullable</p>
+<p>]: /2008/04/08/whats-the-opposite-of-nullable/</p>
+<p>In a production environment, this might be too strange looking for some teams. But maybe if it gets popularized enough what was once strange will become familiar. </p>

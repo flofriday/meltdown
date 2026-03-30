@@ -1,0 +1,201 @@
+<p>I hate [duplicate code][dry</p>
+<p>]. [Hate it][dry 2</p>
+<p>] [hate it][dry 3</p>
+<p>] [hate it][dry 4</p>
+<p>]. At the same time, I <em>do</em> like having my code check its arguments. After a while, I noticed that half of the functions I wrote looked like this:</p>
+<p>[dry]: http://en.wikipedia.org/wiki/DRY [dry 2</p>
+<p>]: http://c2.com/cgi/wiki?DontRepeatYourself [dry 3]: http://www.codinghorror.com/blog/archives/000805.html [dry 4</p>
+<p>]: http://www.thefrontside.net/blog/repeat_yourself</p>
+<pre class="csharp"><code>void SomeMethod(Foo foo)
+{
+    if (foo == null) throw new ArgumentNullException(&quot;foo&quot;);
+
+    // ...
+}</code></pre>
+<p>That&#x27;s good code in the sense that it bails on <code>null</code>, but it&#x27;s got a couple of things I don&#x27;t like. First, I have to keep copying and pasting that exception line in every method. I know, it&#x27;s just one line, but it started to annoy me.</p>
+<p>Worse is that to a <em>caller</em> of the function, there&#x27;s no way to tell that <code>SomeMethod()</code> doesn&#x27;t allow a <code>null</code> value for <code>foo</code> without looking at the method body (which may not be available to an API user).</p>
+<p>The [<code>Nullable&lt;T&gt;</code>][nullable</p>
+<p>] type in the [BCL][</p>
+<p>] (which is automatically aliased to it&#x27;s more familiar <code>?</code>, as in <code>int?</code>) had me wondering. Can I make the opposite? A &quot;not nullable?&quot;</p>
+<p>[nullable]: https://docs.microsoft.com/en-us/dotnet/api/system.nullable-1?view=net-5.0 [bcl</p>
+<p>]: https://docs.microsoft.com/en-us/dotnet/standard/framework-libraries</p>
+<h2>NotNull&amp;lt;T&amp;gt;</h2>
+<p>Let&#x27;s build it a bit at a time. The core not-very-clever idea is just a class that wraps a reference. When you construct it, it throws our familiar <code>ArgumentNullException</code> if the reference is <code>null</code>:</p>
+<pre class="csharp"><code>public class NotNull&lt;T&gt;
+{
+    public T Value
+    {
+        get { return mValue; }
+    }
+
+    public NotNull(T maybeNull)
+    {
+        if (maybeNull == null)
+        {
+            throw new ArgumentNullException(&quot;maybeNull&quot;);
+        }
+
+        mValue = maybeNull;
+    }
+
+    private T mValue;
+}</code></pre>
+<p>Definitely not rocket science. Now you can define methods like this:</p>
+<pre class="csharp"><code>void SomeMethod(NotNull&lt;Foo&gt; foo) {}</code></pre>
+<p>By the time you get to your method body, you can be sure that <code>foo</code> is not <code>null</code>. Unfortunately, your call sites just got uglier:</p>
+<pre class="csharp"><code>SomeMethod(new NotNull(myFoo));</code></pre>
+<p>A conversion operator will fix that:</p>
+<pre class="csharp"><code>// In NotNull&lt;T&gt;:
+public static implicit operator NotNull&lt;T&gt;(T maybeNull)
+{
+    return new NotNull&lt;T&gt;(maybeNull);
+}</code></pre>
+<p>Now the call sites are unchanged:</p>
+<pre class="csharp"><code>SomeMethod(mFoo);</code></pre>
+<p>When you make the call, the compiler automatically inserts a conversion, which in turn bails if <code>myFoo</code> is <code>null</code>. We can make things a little easier by providing a conversion the other way too:</p>
+<pre class="csharp"><code>public static implicit operator T(NotNull&lt;T&gt; notNull)
+{
+    return notNull.Value;
+}</code></pre>
+<p>Now you can do this:</p>
+<pre class="csharp"><code>void SomeMethod(NotNull&lt;Foo&gt; foo)
+{
+    // Automatically converts on assign. :)
+    Foo someFoo = foo;
+
+    // But not on member access. :(
+    // Can&#x27;t do foo.SomeFooProperty, have to do:
+    foo.Value.SomeFooProperty;
+}</code></pre>
+<p>Not too shabby. The bonus, and the real reason I like this is that you&#x27;ve now <strong>decorated the function signature itself with its requirements</strong>. Any caller of <code>SomeMethod()</code> will now see in Intellisense that it requires a <code>NotNull&lt;Foo&gt;</code>. We&#x27;ve moved an <em>imperative</em> exception check to a <em><a href="http://en.wikipedia.org/wiki/Declarative_programming">declarative</a> property</em> of the argument itself.</p>
+<h2>Caveats</h2>
+<p>I&#x27;d like to say this is a perfect solution, but alas it&#x27;s not. There&#x27;s at least one caveat to be aware of. This won&#x27;t work with interface types. That&#x27;s because value types can implement interfaces too, and you can&#x27;t compare a value type to <code>null</code>. If you can figure out a way around this, holler.</p>
+<p><strong>Edit:</strong> as Brad points out below, this does work with interfaces... sort of. The limitation is that implicit conversion operators don&#x27;t work with them. The actual wrapping and <code>null</code> checks are fine. It&#x27;s just that to use it with an interface, you have to do:</p>
+<pre class="csharp"><code>SomeMethod(new NotNull(myInterfaceFoo));</code></pre>
+<p>which is kind of lame. But aside from that, you can use interfaces with this. Thanks, B-Rad!</p>
+<h2>The whole shebang</h2>
+<p>Oh, and here&#x27;s a prettier version with comments and stuff. Don&#x27;t say I never gave you nothing:</p>
+<pre class="csharp"><code>/// &lt;summary&gt;
+/// &lt;para&gt;
+/// Wrapper around a reference that ensures the reference is not &lt;c&gt;null&lt;/c&gt;.
+/// Provides implicit cast operators to automatically wrap and unwrap
+/// values.
+/// &lt;/para&gt;
+/// &lt;para&gt;
+/// NotNull{T} can be used as an argument to a method to ensure that
+/// no &lt;c&gt;null&lt;/c&gt; values are passed to the method in place of manually
+/// throwing an &lt;see cref=&quot;ArgumentNullException&quot;/&gt;. It has an added
+/// benefit over that because using it as an argument type clearly
+/// communicates to the caller the expectation of the method.
+/// &lt;/para&gt;
+/// &lt;/summary&gt;
+/// &lt;typeparam name=&quot;T&quot;&gt;Type being wrapped.&lt;/typeparam&gt;
+public class NotNull&lt;T&gt;
+{
+    /// &lt;summary&gt;
+    /// Automatically unwraps the non-&lt;c&gt;null&lt;/c&gt; object being wrapped
+    /// by this NotNull{T}.
+    /// &lt;/summary&gt;
+    /// &lt;param name=&quot;notNull&quot;&gt;The wrapper.&lt;/param&gt;
+    /// &lt;returns&gt;The raw object being wrapped.&lt;/returns&gt;
+    public static implicit operator T(NotNull&lt;T&gt; notNull)
+    {
+        return notNull.Value;
+    }
+
+    /// &lt;summary&gt;
+    /// Automatically wraps an object in a NotNull{T}. Will throw
+    /// an &lt;see cref=&quot;ArgumentNullException&quot;/&gt; if the value being
+    /// wrapped is &lt;c&gt;null&lt;/c&gt;.
+    /// &lt;/summary&gt;
+    /// &lt;param name=&quot;maybeNull&quot;&gt;The raw reference to wrap.&lt;/param&gt;
+    /// &lt;returns&gt;A new NotNull{T} that wraps the value, provided the
+    /// value is not &lt;c&gt;null&lt;/c&gt;.&lt;/returns&gt;
+    /// &lt;exception cref=&quot;ArgumentNullException&quot;&gt;If &lt;c&gt;maybeNull&lt;/c&gt; is &lt;c&gt;null&lt;/c&gt;.&lt;/exception&gt;
+    public static implicit operator NotNull&lt;T&gt;(T maybeNull)
+    {
+        return new NotNull&lt;T&gt;(maybeNull);
+    }
+
+    /// &lt;summary&gt;
+    /// Gets and sets the non-null reference being wrapped by this
+    /// NotNull{T}.
+    /// &lt;/summary&gt;
+    /// &lt;exception cref=&quot;ArgumentNullException&quot;&gt;If &lt;c&gt;value&lt;/c&gt; is &lt;c&gt;null&lt;/c&gt;.&lt;/exception&gt;
+    public T Value
+    {
+        get { return mValue; }
+        set
+        {
+            if (value == null) throw new ArgumentNullException(&quot;value&quot;);
+            mValue = value;
+        }
+    }
+
+    /// &lt;summary&gt;
+    /// Creates a new wrapper around the given reference.
+    /// &lt;/summary&gt;
+    /// &lt;remarks&gt;Explicitly calling the constructor is rarely needed. Usually the
+    /// implicit cast is simpler.&lt;/remarks&gt;
+    /// &lt;param name=&quot;maybeNull&quot;&gt;The reference to wrap.&lt;/param&gt;
+    /// &lt;exception cref=&quot;ArgumentNullException&quot;&gt;If &lt;c&gt;maybeNull&lt;/c&gt; is &lt;c&gt;null&lt;/c&gt;.&lt;/exception&gt;
+    public NotNull(T maybeNull)
+    {
+        if (maybeNull == null) throw new ArgumentNullException(&quot;maybeNull&quot;);
+
+        mValue = maybeNull;
+    }
+
+    private T mValue;
+}</code></pre>
+<p>Here&#x27;s a unit test:</p>
+<pre class="csharp"><code>[TestFixture]
+public class NotNullFixture
+{
+    [Test]
+    public void TestConstructor()
+    {
+        Foo foo = new Foo();
+        NotNull&lt;Foo&gt; notNull = new NotNull&lt;Foo&gt;(foo);
+    }
+
+    [Test]
+    [ExpectedException(typeof(ArgumentNullException))]
+    public void TestConstructorThrowsOnNull()
+    {
+        Foo foo = null;
+        NotNull&lt;Foo&gt; notNull = new NotNull&lt;Foo&gt;(foo);
+    }
+
+    [Test]
+    public void TestGetValue()
+    {
+        Foo foo = new Foo();
+        NotNull&lt;Foo&gt; notNull = new NotNull&lt;Foo&gt;(foo);
+
+        Assert.AreEqual(foo, notNull.Value);
+    }
+
+    [Test]
+    public void TestImplicitWrap()
+    {
+        Foo foo = new Foo();
+        NotNull&lt;Foo&gt; notNull = foo;
+
+        Assert.AreEqual(foo, notNull.Value);
+    }
+
+    [Test]
+    public void TestImplicitUnwrap()
+    {
+        Foo foo = new Foo();
+        NotNull&lt;Foo&gt; notNull = new NotNull&lt;Foo&gt;(foo);
+
+        Foo unwrap = notNull;
+
+        Assert.AreEqual(foo, unwrap);
+    }
+
+    public class Foo { }
+}</code></pre>
+<p></p>

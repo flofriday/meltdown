@@ -1,0 +1,145 @@
+<p>Like a lot of object-oriented programmers, I&#x27;m a fan of *[Design Patterns][</p>
+<p>]*. While I don&#x27;t treat it like the sacred tome that many think it is, I learned a lot of tricks for solving design problems from it. As I&#x27;ve moved from C++ towards other languages, it&#x27;s become clear that many patterns in the book exist just to get around limitations in C++.</p>
+<p>[design patterns]: http://www.c2.com/cgi/wiki?DesignPatterns</p>
+<p>The anti-C++ crowd just uses this as evidence that C++ sucks since you have to write a whole book to get around its shortcomings. Let&#x27;s not go there.</p>
+<p>Instead, I want to see if I can show you a bit about a language feature that C++ lacks and that you may not know ([closures][</p>
+<p>]) by getting there from something familiar to an average C++ object-oriented programmer (the [Command Pattern][</p>
+<p>]) and changing it in stages. I&#x27;ll use C# as the example language here, but any language with closures will work: Lua, Scheme, etc.</p>
+<p>[closures]: http://en.wikipedia.org/wiki/Closure_%28computer_science%29 [command pattern</p>
+<p>]: http://en.wikipedia.org/wiki/Command_pattern</p>
+<h2>The Command Pattern</h2>
+<p>Let&#x27;s say you&#x27;re writing a chess program. You want it to support both regular human players and built-in AI players. The core chess engine doesn&#x27;t care about what kind of players it&#x27;s dealing with. All it needs to know is for a given player, what that player&#x27;s move is.</p>
+<p>For a human player, the user interface gets the user&#x27;s move selection and passes that to the engine. For a computer-controlled player, the AI rules select the best move and pass it in.</p>
+<p>To represent a &quot;move&quot;, we use the Command Pattern. The basic idea is that you have a <em>command</em> class that encapsulates some procedure to perform and any data that procedure needs. You can think of it like a function call and its arguments bottled up together to be opened later by some other part of the program. A vanilla implementation is something like:</p>
+<pre class="csharp"><code>interface ICommand
+{
+    void Invoke();
+}
+
+class MovePieceCommand : ICommand
+{
+    public Piece Piece;
+    public int   X;
+    public int   Y;
+
+    public void Invoke()
+    {
+        Piece.MoveTo(X, Y);
+    }
+}</code></pre>
+<p>We&#x27;ll also create a little factory for creating the commands. This isn&#x27;t necessary now, but it&#x27;ll make sense later when we start moving things around.</p>
+<pre class="csharp"><code>static class Commands
+{
+    // Create a command to move a piece.
+    public static ICommand MovePiece(Piece piece, int x, int y)
+    {
+        var command = new MovePieceCommand();
+        command.Piece = piece;
+        command.X = x;
+        command.Y = y;
+
+        return command;
+    }
+}</code></pre>
+<p>To complete this first pass, here&#x27;s a little block to test our code:</p>
+<pre class="csharp"><code>class Program
+{
+    public static Main(string[] args)
+    {
+        // UI or AI creates command.
+        var piece = new Piece();
+        var command = Commands.MovePiece(piece, 3, 4);
+
+        // Chess engine invokes it.
+        command.Invoke();
+    }
+}</code></pre>
+<h2>The first change: delegates</h2>
+<p>The first change we&#x27;ll make is a pretty minor one. The <code>ICommand</code> interface only has a single method, <code>Invoke()</code>, so there&#x27;s no real reason to make an interface for it. Since delegates in C# work fine on instance methods, we can just use that instead. We&#x27;ll define a delegate type for a function that takes no arguments and returns nothing, just like the <code>Invoke()</code> method in <code>ICommand</code>.</p>
+<pre class="csharp"><code>delegate CommandDel();
+
+class MovePieceCommand
+{
+    public Piece Piece;
+    public int   X;
+    public int   Y;
+
+    public void Invoke()
+    {
+        Piece.MoveTo(X, Y);
+    }
+}
+
+static class Commands
+{
+    // Create a command to move a piece.
+    public static CommandDel MovePiece(Piece piece, int x, int y)
+    {
+        var command = new MovePieceCommand();
+        command.Piece = piece;
+        command.X = x;
+        command.Y = y;
+
+        return command.Invoke;
+    }
+}
+
+class Program
+{
+    public static Main(string[] args)
+    {
+        // UI or AI creates command.
+        var piece = new Piece();
+        var command = Commands.MovePiece(piece, 3, 4);
+
+        // Chess engine invokes it.
+        command();
+    }
+}</code></pre>
+<p>Not much different, although we did get to ditch the interface without any loss in functionality.</p>
+<h2>The second change: ditch <code>Invoke()</code></h2>
+<p>That <code>Invoke()</code> method up there really doesn&#x27;t do much. It just calls another function. Let&#x27;s see if we can pull that out. C# has &quot;anonymous delegates&quot;, which are basically functions defined within the body of another function. We&#x27;ll try that.</p>
+<pre class="csharp"><code>class MovePieceCommand
+{
+    public Piece Piece;
+    public int   X;
+    public int   Y;
+}
+
+static class Commands
+{
+    // create a command to move a piece
+    public static Action MovePiece(Piece piece, int x, int y)
+    {
+        var command = new MovePieceCommand();
+        command.Piece = piece;
+        command.X     = x;
+        command.Y     = y;
+
+        CommandDelegate invoke = delegate()
+            {
+                command.Piece.MoveTo(command.X, command.Y);
+            };
+
+        return invoke;
+    }
+}</code></pre>
+<p>Now instead of an <code>Invoke()</code> <em>method</em> we have an anonymous function stored in a local <code>invoke</code> variable. But this local function isn&#x27;t a method, so it doesn&#x27;t have a <code>this</code> reference. How does it get access to the <code>MovePieceCommand</code> that stores the piece and location to move it to?</p>
+<p>Like a little magic trick, the body of the <code>invoke</code> delegate actually accesses the <code>MovePieceCommand</code> stored in <code>command</code>, a local variable defined <em>outside</em> of itself in <code>MovePiece</code>. <em>That&#x27;s</em> a closure: a local function that references a variable defined outside of its scope.</p>
+<p>In C#, the compiler will make sure those closed over local variables get moved to the heap, so that our delegate still has access to them even after <code>MovePiece</code> has returned. It actually does this by building a little class like our old <code>MovePieceCommand</code> and turns the delegate we just made back into a method. The advantage is that the <em>compiler</em> writes the class for us. We don&#x27;t have to. Call me lazy, but if there&#x27;s anything I like, it&#x27;s <em>doing less</em>.</p>
+<h2>Clean up</h2>
+<p>By now it&#x27;s clear that <code>MovePieceCommand</code> isn&#x27;t doing much. It&#x27;s just a bag of data. If our anonymous delegate can access local variables outside its scope anyway, there&#x27;s no reason to bundle them into an object. Let&#x27;s kill it.</p>
+<p>To clean things up a bit more, we&#x27;ll also define the delegate using C#&#x27;s newer [lambda syntax][</p>
+<p>]. It does the exact same thing, but more tersely.</p>
+<p>[lambda syntax]: http://msdn.microsoft.com/en-us/library/bb397687.aspx</p>
+<pre class="csharp"><code>static class Commands
+{
+    // create a command to move a piece
+    public static Action MovePiece(Piece piece, int x, int y)
+    {
+        return () =&gt; piece.MoveTo(x, y);
+    }
+}</code></pre>
+<p>And just like that, our whole command pattern has become a single line of code.</p>
+<h2>Conclusion</h2>
+<p>There are plenty of cases where it&#x27;s still useful to implement a full command pattern: maybe you need to be able to invoke the command in multiple ways, or undo it. However, for simple problems, I go for the simple solution. If you&#x27;re working in a language with closures, it doesn&#x27;t get simpler than this. </p>

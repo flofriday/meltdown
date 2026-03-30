@@ -1,0 +1,25 @@
+<p>&lt;div class=&quot;update&quot;&gt; &lt;p&gt;&lt;em&gt;Update 2011/09/9:&lt;/em&gt; Moved JASIC from bitbucket to github.&lt;/p&gt; &lt;/div&gt;</p>
+<p>I just put the finishing touches on a tiny little interpreter project: Jasic. Jasic is a dialect of the [original BASIC][</p>
+<p>] programming language. It lacks functions and scope, but it&#x27;s a usable language. Even on an old Apple IIe, it was powerful enough to get me hooked on coding for life. Also, you can [draw a Mandelbrot set][mandelbrot</p>
+<p>] with it.</p>
+<p>[original basic]: http://en.wikipedia.org/wiki/Dartmouth_BASIC [mandelbrot</p>
+<p>]: http://github.com/munificent/jasic/blob/master/sample/mandel.jas</p>
+<p>I wanted to see if I could fit a complete interpreter in a single readable Java file. It worked out better than expected, so I went ahead and cleaned up the code and commented the hell out of it. If you&#x27;ve always wanted to learn more about interpreters, now you&#x27;ve got a little primer.</p>
+<p>Here&#x27;s a little code to give you a flavor of the language:</p>
+<pre class="jasic"><code>&#x27; Initialize the loop counter.
+count = 10
+
+&#x27; Stop looping if we&#x27;re done.
+top:
+if count = 0 then end
+print &quot;Hello, world!&quot;
+
+&#x27; Decrement and restart the loop.
+count = count - 1
+goto top
+end:</code></pre>
+<p>Old school! All of the code is [right here in Jasic.java][jasic</p>
+<p>]. There&#x27;s also a [README][</p>
+<p>] to help get you started. What are you waiting for?</p>
+<p>[jasic]: http://github.com/munificent/jasic/blob/master/com/stuffwithstuff/Jasic.java [readme</p>
+<p>]: http://github.com/munificent/jasic/blob/master/README</p>

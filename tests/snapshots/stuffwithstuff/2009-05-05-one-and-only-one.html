@@ -1,0 +1,51 @@
+<p>My little language [Magpie][</p>
+<p>] has a feature that may at first seem really limiting: <em>all functions take exactly one argument and return one value, no more, no less.</em> I&#x27;ll try to explain why I made that choice, and some of the surprising benefits of it.</p>
+<p>[magpie]: https://magpie-lang.org/</p>
+<p>It feels weird explaining a programming language that literally no one on Earth is using, but my hope is that in the future people <em>will</em> be using Magpie, and this might come in handy. At the very least, it&#x27;ll help me remember where I&#x27;m at.</p>
+<p>First off, a quick primer in Magpie syntax. Here&#x27;s a function to square a number:</p>
+<pre class="magpie1"><code>Square (n Int -&gt; Int) n * n</code></pre>
+<p>The name comes first, followed by the type signature in parentheses. To the left of the <code>-&gt;</code> is the argument, to the right is the return type. The body of the function is the single expression <code>n * n</code>. Like Ruby and most functional languages, returning is implicit: a function returns the result of evaluating its body.</p>
+<p>You can call it like this:</p>
+<pre class="magpie1"><code>Square 3 // Returns 9.</code></pre>
+<p>Unlike C and other languages, function arguments aren&#x27;t put inside parentheses.</p>
+<h2>So what if I want to pass in multiple args?</h2>
+<p>That&#x27;s easy. Here&#x27;s a function to multiply three numbers:</p>
+<pre class="magpie1"><code>Mult (a Int, b Int, c Int -&gt; Int) a * b * c</code></pre>
+<p>You can call it like:</p>
+<pre class="magpie1"><code>Mult (2, 3, 4) // Returns 24.</code></pre>
+<h2>Hey! I thought you said functions always take one argument!</h2>
+<p>They do, they do. However, Magpie also supports [tuples][</p>
+<p>]. A tuple lets you make a single value by combining others together. In Magpie, tuples are created using the comma operator:</p>
+<p>[tuples]: http://en.wikipedia.org/wiki/Tuple</p>
+<pre class="magpie1"><code>(1, 2)             // A tuple of two Int fields.
+(2, true, &quot;three&quot;) // A tuple of three fields of different type.</code></pre>
+<p>(They are also placed inside parentheses, but you can more or less ignore that. It&#x27;s more for precedence reasons than anything else. The comma is where the magic is.)</p>
+<p>So, when you see a call like <code>Mult (2, 3, 4)</code> what you&#x27;re really seeing is calling <code>Mult</code> with a single argument, the tuple <code>(2, 3, 4)</code>.</p>
+<h2>Are you just playing semantics?</h2>
+<p>No, this isn&#x27;t just a semantic trick. <code>Mult</code> really does take a single value. I&#x27;ll prove it:</p>
+<pre class="magpie1"><code>// Create a local variable and assign a tuple to it.
+def arg &lt;- (2, 3, 4)
+
+// Pass the single argument to the function.
+Mult arg</code></pre>
+<p>This is perfectly legit in Magpie and doesn&#x27;t require function overloading or anything. In fact, this is kind of useful. When you start playing with function references (i.e. callbacks), it&#x27;s really convenient to be able to pass around arguments to functions without needing to distinguish between how many arguments it takes: it always takes one.</p>
+<h2>Neat trick. What about functions with no arguments?</h2>
+<p>That actually uses tuples too, sort of. You can make a tuple out of any number of values, including one and zero. A single value <em>is</em> a one-value tuple (a monuple?). But you can also have a tuple with <em>no</em> values, strange as that sounds. There&#x27;s exactly one of them. (How could there be different ones?) It&#x27;s called &quot;Unit&quot;, and looks like <code>()</code>. So if you had a function like this:</p>
+<pre class="magpie1"><code>SayHi (-&gt;) Print &quot;hi!&quot;</code></pre>
+<p>You could call it like this:</p>
+<pre class="magpie1"><code>SayHi () // Prints &quot;hi&quot;.</code></pre>
+<p>That&#x27;s a bit tedious, though, so in most cases you can omit the <code>()</code> and Magpie will infer it:</p>
+<pre class="magpie1"><code>SayHi // Prints &quot;hi&quot;.</code></pre>
+<h2>What about returns? I don&#x27;t see <code>Print</code> returning anything.</h2>
+<p>Sure, it is. Just like Unit can be omitted as an argument, it&#x27;s also omitted as a return. <code>Print</code> returns <code>()</code> every time it&#x27;s called. Since a function returns the result of evaluating its body, that means <code>SayHi</code> also returns <code>()</code>.</p>
+<h2>What&#x27;s the point?</h2>
+<p>Unit gives us the ability to make everything in Magpie an expression. Since you can return Unit like a value, Magpie doesn&#x27;t need to make a distinction between <em>expressions</em> (which return things) and <em>statements</em> (which don&#x27;t). This means that things like flow control can be regular expressions in Magpie. For example:</p>
+<pre class="magpie1"><code>Square (if 1 &lt; 2 then 3 else 4)</code></pre>
+<p>This calls the <code>Square</code> function and passes in 3. We can do this because <code>if/then/else</code> is a regular expression and can be used anywhere.</p>
+<p>So having &quot;nothing&quot; be a returnable value lets us make the language a lot more flexible.</p>
+<h2>You still forgot one case...</h2>
+<p>And, of course, this also means you can return <em>multiple</em> values, just like you can in Python or Lua:</p>
+<pre class="magpie1"><code>Swap (a Int, b Int -&gt; (Int, Int)) (b, a)
+
+Swap (1, 2) // returns (2, 1)</code></pre>
+<p>So, in the end, it isn&#x27;t much of a limitation at all. </p>

@@ -1,0 +1,137 @@
+<p>&lt;div class=&quot;update&quot;&gt; &lt;p&gt;&lt;em&gt;Update 2021/09/22:&lt;/em&gt; The Enum class has a built-in &lt;a href=&quot;https://docs.microsoft.com/en-us/dotnet/api/system.enum.hasflag?view=net-5.0&quot;&gt;&lt;code&gt;HasFlag()&lt;/code&gt;&lt;/a&gt; method now.&lt;/p&gt; &lt;/div&gt;</p>
+<p>I like C# [enums] and I also like using them as [bitfields</p>
+<p>][], even though apparently [not everyone does</p>
+<p>][dislike]. I realize they aren&#x27;t perfectly typesafe, but then I don&#x27;t think that&#x27;s the problem [Abrams</p>
+<p>][] and company were trying to solve anyway.</p>
+<p>[enums]: https://docs.microsoft.com/en-us/dotnet/csharp/language-reference/builtin-types/enum [bitfields</p>
+<p>]: https://docs.microsoft.com/en-us/dotnet/api/system.flagsattribute?view=net-5.0 [dislike]: http://cleveralias.blogs.com/thought_spearmints/2004/01/more_c_enum_wac.html [abrams</p>
+<p>]: http://blogs.msdn.com/brada/</p>
+<p>Here&#x27;s an example one:</p>
+<pre class="csharp"><code>[Flags]
+public enum Fruits
+{
+    Apple       = 1,
+    Banana      = 2,
+    Cherry      = 4,
+    Date        = 8,
+    Eggplant    = 16
+}</code></pre>
+<p>Nice, clean syntax. The way they solved C++&#x27;s name collision issues with enum values is genius: <code>Fruits.Apple</code>. Clearly these guys are using the old noggin.</p>
+<h2>The annoying bit (argh, a pun)</h2>
+<p>The one thing that <em>does</em> annoy me about flag enums is the syntax to see if a given flag (or set of flags) is set:</p>
+<pre class="csharp"><code>if ((myFruit &amp; Fruits.Date) == Fruits.Date)</code></pre>
+<p>I&#x27;m not afraid of bitwise operators, but there&#x27;s some serious lameness in here. Needing to specify the explicit <code>==</code> for type safety and having to use the parenthesis because the operator precedence puts <code>==</code> before <code>&amp;</code> first? Gross.</p>
+<h2>For every nail there is a hammer</h2>
+<p>Behold the solution:</p>
+<pre class="csharp"><code>public static class FruitsExtensions
+{
+    public static bool IsSet(this Fruits fruits, Fruits flags)
+    {
+        return (fruits &amp; flags) == flags;
+    }
+}</code></pre>
+<p>With that, you can just do:</p>
+<pre class="csharp"><code>if (myFruit.IsSet(Fruits.Date))</code></pre>
+<p>Much nicer. For kicks, here&#x27;s some other useful methods:</p>
+<pre class="csharp"><code>public static class FruitsExtensions
+{
+    public static bool IsSet(this Fruits fruits, Fruits flags)
+    {
+        return (fruits &amp; flags) == flags;
+    }
+
+    public static bool IsNotSet(this Fruits fruits, Fruits flags)
+    {
+        return (fruits &amp; (~flags)) == 0;
+    }
+
+    public static Fruits Set(this Fruits fruits, Fruits flags)
+    {
+        return fruits | flags;
+    }
+
+    public static Fruits Clear(this Fruits fruits, Fruits flags)
+    {
+        return fruits &amp; (~flags);
+    }
+}</code></pre>
+<p>Useful, no?</p>
+<h2>Why solve one when you can solve <em>n</em>?</h2>
+<p>So, if you&#x27;re like me and [this guy][bennage</p>
+<p>], right now you&#x27;re thinking, &quot;This just fixes one enum. Can I solve it for all enums?&quot; Ideally, you&#x27;d do something like:</p>
+<p>[bennage]: https://web.archive.org/web/20120423104722/http://devlicious.com/blogs/christopher_bennage/archive/2007/09/13/my-new-little-friend-enum-lt-t-gt.aspx</p>
+<pre class="csharp"><code>public static class EnumExtensions
+{
+    public static bool IsSet&lt;T&gt;(this T value, T flags) where T : Enum
+    {
+        return (value &amp; flags) == flags;
+    }
+}</code></pre>
+<p>Unfortunately, that doesn&#x27;t fly. You can&#x27;t use <code>Enum</code> as a constraint. Likewise, there&#x27;s no way to require a typeparam to implement an operator (like <code>&amp;</code> above). You <em>can</em> implement a generic solution for this:</p>
+<pre class="csharp"><code>public static class EnumExtensions
+{
+    public static bool IsSet&lt;T&gt;(this T value, T flags)
+        where T : struct
+    {
+        Type type = typeof(T);
+
+        // only works with enums
+        if (!type.IsEnum) throw new ArgumentException(
+            &quot;The type parameter T must be an enum type.&quot;);
+
+        // handle each underlying type
+        Type numberType = Enum.GetUnderlyingType(type);
+
+        if (numberType.Equals(typeof(int)))
+        {
+            return Box&lt;int&gt;(value, flags, (a, b) =&gt; (a &amp; b) == b);
+        }
+        else if (numberType.Equals(typeof(sbyte)))
+        {
+            return Box&lt;sbyte&gt;(value, flags, (a, b) =&gt; (a &amp; b) == b);
+        }
+        else if (numberType.Equals(typeof(byte)))
+        {
+            return Box&lt;byte&gt;(value, flags, (a, b) =&gt; (a &amp; b) == b);
+        }
+        else if (numberType.Equals(typeof(short)))
+        {
+            return Box&lt;short&gt;(value, flags, (a, b) =&gt; (a &amp; b) == b);
+        }
+        else if (numberType.Equals(typeof(ushort)))
+        {
+            return Box&lt;ushort&gt;(value, flags, (a, b) =&gt; (a &amp; b) == b);
+        }
+        else if (numberType.Equals(typeof(uint)))
+        {
+            return Box&lt;uint&gt;(value, flags, (a, b) =&gt; (a &amp; b) == b);
+        }
+        else if (numberType.Equals(typeof(long)))
+        {
+            return Box&lt;long&gt;(value, flags, (a, b) =&gt; (a &amp; b) == b);
+        }
+        else if (numberType.Equals(typeof(ulong)))
+        {
+            return Box&lt;ulong&gt;(value, flags, (a, b) =&gt; (a &amp; b) == b);
+        }
+        else if (numberType.Equals(typeof(char)))
+        {
+            return Box&lt;char&gt;(value, flags, (a, b) =&gt; (a &amp; b) == b);
+        }
+        else
+        {
+            throw new ArgumentException(
+                &quot;Unknown enum underlying type &quot; +
+                numberType.Name + &quot;.&quot;);
+        }
+    }
+
+    /// Helper function for handling the value types. Boxes the
+    /// params to object so that the cast can be called on them.
+    private static bool Box&lt;T&gt;(object value, object flags,
+        Func&lt;T, T, bool&gt; op)
+    {
+        return op((T)value, (T)flags);
+    }
+}</code></pre>
+<p>...but, yeah, it&#x27;s not exactly fun using reflection for this. </p>

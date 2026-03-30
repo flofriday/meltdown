@@ -1,0 +1,110 @@
+<p>I got started hacking on my own roguelike after spending several years avidly playing [Angband][</p>
+<p>]. Like most projects, I had a few itches I wanted to scratch and it kind of took on a life of its own. One thing that annoyed me about Angband was how monsters dropped loot when they died.</p>
+<p>[angband]: http://rephial.org/</p>
+<p>In Angband, any monster that drops stuff can drop pretty much anything. Monsters have a level, and if they drop loot, it just randomly picks any item near the monster&#x27;s level. This bugged me for two reasons:</p>
+<p>1.  <strong>It felt flavorless and unrealistic.</strong> For example, the description of a novice mage is:</p>
+<p>    <code></code>`     The Novice mage  (Red &#x27;p&#x27;)     === Num:38  Lev:2  Rar:1  Spd:+0  Hp:6d4  Ac:6  Exp:6     He is leaving behind a trail of dropped spell components.     <code></code>`</p>
+<p>    But when you hack one to pieces, he&#x27;s as likely to drop a sword as he is     anything magical. This makes monsters feel too similar each other: each one     is basically a spin on the one giant Wheel Of Loot.</p>
+<p>2.  <strong>It made it impossible for the player to seek certain items.</strong> Let&#x27;s say     you&#x27;ve got a good kit of armor except you really could use some high quality     boots. How do you fill in that gap?</p>
+<p>    In Angband, the answer is &quot;kill a whole ton of stuff and wade through piles     of loot you don&#x27;t care about&quot;. Especially near the end game where you&#x27;re     looking for just a few specific pieces of gear, you spend a <em>lot</em> of time     just killing dragons and hunting through mountains of loot. 95% of it gets     left on the ground.</p>
+<p>I wanted to solve this by making different monsters drop different stuff. Kill a warrior, and you should get weapons and armor. Kill a wizard, get wands and scrolls.</p>
+<h2>Monster-specific loot</h2>
+<p>My first pass at this was to give each monster its own set of drops. I had already made monsters data-driven. I came up with my own little text format so monsters were defined in text something like:</p>
+<pre><code>dwarf miner
+    color     = DarkGray
+    depth     = 22
+    health    = 44
+    attacks
+        hammers = 15t5
+    description
+        Covered from head to toe is dust and dirt, you can barely
+        make out the form of this weary dwarf.</code></pre>
+<p>For each monster (or at least, each one that drops loot), I added a &quot;drops&quot; section, like:</p>
+<pre><code>drops
+    hammer (50%)</code></pre>
+<p>And, behold, kill a dwarven miner and there&#x27;s a fifty-fifty chance he&#x27;ll drop a hammer. But dwarves like gems too, right? So I added that in too. Only the problem is that there&#x27;s a bunch of different kinds of gems, so I ended up with something like:</p>
+<pre><code>drops
+    hammer (50%)
+    amethyst (10%)
+    sapphire (7%)
+    emerald (4%)
+    ruby (3%)
+    diamond (2%)
+    blue diamond (1%)</code></pre>
+<p>The game uses the percentages to pick one of the drops. Notice how the better gems are rarer? That&#x27;s fine for a miner, which is a pretty weak dwarf, but a dwarf chieftan should tend to drop better gems:</p>
+<pre><code>drops
+    amethyst (3%)
+    sapphire (5%)
+    emerald (8%)
+    ruby (10%)
+    diamond (8%)
+    blue diamond (5%)</code></pre>
+<p>Now consider that there&#x27;s a few different types of hammers too... Things got pretty nasty pretty quickly. It was a huge chore to maintain these giant tuned drop tables for each of potentially hundreds of monsters. Ugh.</p>
+<p>The first thing I realized was that there was a lot of overlap between monsters. Dwarven miners and dwarven warriors drop the same gems with the same frequency. So I made &quot;macros&quot; in my drop language. I could define:</p>
+<pre><code>(gem)
+    hammer (50%)
+    amethyst (10%)
+    sapphire (7%)
+    emerald (4%)
+    ruby (3%)
+    diamond (2%)
+    blue diamond (1%)</code></pre>
+<p>Then in dwarven miner and warrior, just add:</p>
+<pre><code>drops
+    (gem)</code></pre>
+<p>The <code>(gem)</code> would then expand to that little weighted table of gems. That worked fine when the probabilities of each gem were the same, but it meant I couldn&#x27;t reuse these tables across dwarves of different <em>difficulty</em>. Stronger dwarves drop the same gems but with different probabilities.</p>
+<p>So I came up with a different kind of drop that selects from a bunch of child drops based on <em>level</em>. This let me define:</p>
+<pre><code>(gem)
+    one near level
+        amethyst (23)
+        sapphire (38)
+        emerald (52)
+        ruby (62)
+        diamond (87)
+        blue diamond (95)</code></pre>
+<p>The &quot;one near level&quot; part would take the monster&#x27;s level into account, plus a bit of randomness, and pick a child drop from within it. Now I could reuse <code>(gem)</code> across a range of different difficulties. Of course, I still had to define lots of tables for all of these different &quot;kinds&quot; of drops. There was a table for gems, stones, hammers, daggers, etc. Piles of data.</p>
+<p>After all of that, I found it wasn&#x27;t fun to play. The problem was that even with these tables, killing a monster was... <em>boring</em>. Every time you killed a dwarf, you knew what you were going to get. You might get a better gem (yay), but nothing surprising.</p>
+<h2>Simpler Sequences</h2>
+<p>A few years ago, I [ported the game][hauberk</p>
+<p>] to [Dart]. When I did, I tried to simplify as many things as I could. I didn&#x27;t want to rewrite this whole giant DSL macro language thing. Instead, I noticed that every item seemed to be a member of some sequence. Emeralds are always in a sequence of gems, a hammer is in a sequence with warhammers and mattocks, etc.</p>
+<p>[hauberk]: https://github.com/munificent/hauberk [dart</p>
+<p>]: https://www.dart.dev/</p>
+<p>Instead of building some complex general-purpose loot DSL and then implementing this logic using that, I just built sequences directly into the loot code. When defining a monster (now we&#x27;re in Dart code), you&#x27;d list the drops:</p>
+<pre class="dart"><code>breed(&quot;goblin peon&quot;, lightBrown, 16, [
+  attack(&quot;stab[s]&quot;, 6)
+], drop: [
+  chanceOf(10, &quot;Spear&quot;)
+]);</code></pre>
+<p>The &quot;Spear&quot; means it tends to drop spears. But it also implicitly means it can drop other items in the same sequence that spears are in. This lets you express both a sequence and how deep into the sequence a monster should tend to drop. To have a stronger monster drop items from the deep end of the sequence, just name an item from that end.</p>
+<p>This let me express pretty much what I could before, but it was a hell of a lot simpler. The only limitation is that an item could only be a part of one sequence. In practice, that works OK.</p>
+<p>Unfortunately, though, it didn&#x27;t solve the boringness problem. I learned the hard way that a huge part of the fun of roguelikes is the &quot;lottery effect&quot;. Every time you kill a monster there should be a small chance of getting something really amazing. That &quot;maybe this one will be the big one&quot; anticipation is one of the key emotions in the game.</p>
+<p>With sequences, you could get something good, but never something <em>surprising</em>. Eventually, I hit upon a solution and, so far, I really like it.</p>
+<h2>Item Groups</h2>
+<p>Instead of sequences of items, I now have a <em>hierarchy</em> of them. So, for example, a stilleto is:</p>
+<p>    equipment/weapon/dagger/Stilleto</p>
+<p>I&#x27;m not generally a fan of hierarchies but I found it surprisingly easy to lump almost every item into one. Items also have a &quot;level&quot;, which describes their relative value. Higher level stuff is better.</p>
+<p>When specifying a drop for a monster, I can specify an item name to drop that specific item. But I can also specify the name of part of the path and a level, like:</p>
+<pre class="dart"><code>breed(&quot;goblin peon&quot;, lightBrown, 16, [
+  attack(&quot;stab[s]&quot;, 6)
+], drop: [
+  chanceOf(10, &quot;spear:3&quot;),
+  chanceOf(5, &quot;healing:2&quot;),
+], meander: 2, flags: &quot;few open-doors&quot;);</code></pre>
+<p>The <code>&quot;spear:3&quot;</code> means &quot;drop something from the &#x27;spear&#x27; group around level 3&quot;. You don&#x27;t have to specify the entire path since path components are unique. So &quot;spear&quot; is equivalent to &quot;equipment/weapon/spear&quot;.</p>
+<p>So far, this is pretty much equivalent to the sequences from before. The neat part is what happens when the drop is generated. When picking an item, there&#x27;s a small chance that it will walk up the group chain. So &quot;spear:3&quot; will usually drop a spear, but there&#x27;s a chance it will drop any weapon (the parent group). There&#x27;s an even smaller chance it will drop any piece of equipment (the grandparent).</p>
+<p>Any monster has a chance of dropping almost any item, so you have that pleasant anticipation. At the same time, the probabilities are weighted so that each monster still has a unique &quot;feel&quot; to their drops, and you can seek out monsters that are more likely to drop what you want.</p>
+<p>When specifying a drop, you can also directly specify one of the parent groups. For example:</p>
+<pre class="dart"><code>breed(&quot;goblin warrior&quot;, gray, 32, [
+  attack(&quot;stab[s]&quot;, 14)
+], drop: [
+  chanceOf(20, &quot;equipment:6&quot;)
+], meander: 1, flags: &quot;protective open-doors&quot;);</code></pre>
+<p>Here, the <code>&quot;equipment:6&quot;</code> means a goblin may drop <em>any</em> kind of equipment. This makes it really easy to specify monsters that define wide sets of drops. That&#x27;s good for high level boss monsters that can serve up an assortment of loot.</p>
+<p>At the same time, defining the items is pretty simple. You basically just need to categorize and assign a level for each item. It looks like this:</p>
+<pre class="dart"><code>group(r&quot;\&quot;&quot;, &quot;equipment/weapon/spear&quot;);
+weapon(&quot;Pointed Stick&quot;, 5, brown, &quot;stab[s]&quot;, 7);
+weapon(&quot;Spear&quot;, 25, gray, &quot;stab[s]&quot;, 12);
+weapon(&quot;Angon&quot;, 35, lightGray, &quot;stab[s]&quot;, 16);
+weapon(&quot;Lance&quot;, 45, white, &quot;stab[s]&quot;, 24);
+weapon(&quot;Partisan&quot;, 55, darkGray, &quot;stab[s]&quot;, 36);</code></pre>
+<p>(The numbers after the name are their levels.) Once you do that, all of the rest of the drop behavior falls out naturally. If I add a new item to an existing group, every monster will then start dropping it, with the right probabilities. </p>

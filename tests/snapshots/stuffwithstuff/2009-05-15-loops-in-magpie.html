@@ -1,0 +1,89 @@
+<p>I&#x27;m working on the loop syntax in Magpie right now, and I think I more or less have the plan figured out. Looping is a bit tricky in a language: there&#x27;s a ton of different ways to do it from C&#x27;s basic <code>for (i = 0; i &lt; 100; i++)</code> to Lisp&#x27;s super-powerful (and super-complex) <code>loop</code> macro.</p>
+<p>My goals for loops are the same as my goals for the language in general:</p>
+<ul>
+<li>Add as few new keywords as possible.</li>
+</ul>
+<ul>
+<li>Use function calls for as much of it as possible.</li>
+</ul>
+<ul>
+<li>There must be no visible line between &quot;baked-in&quot; loop functions and</li>
+</ul>
+<p>  user-defined ones.</p>
+<ul>
+<li>The most common use cases should be the most terse.</li>
+</ul>
+<p>The last point is especially pertinent, and is one of the guiding philosophies of the language: the things users do the most should be the most terse. Sort of like [Huffman encoding][</p>
+<p>] for a language.</p>
+<p>[huffman encoding]: http://en.wikipedia.org/wiki/Huffman_encoding</p>
+<p>To accomplish that, I did a little archaeology: I looked at every place in the Magpie C# compiler where I&#x27;m using <code>for</code> or <code>foreach</code>. The results are:</p>
+<ul>
+<li>There are 14 <code>for</code> loops and 40 <code>foreach</code> ones.</li>
+</ul>
+<ul>
+<li>9 of the <code>for</code> loops are to iterate through two arrays in parallel.</li>
+</ul>
+<ul>
+<li>3 of the <code>for</code> loops are to iterate backwards.</li>
+</ul>
+<ul>
+<li>2 of the <code>for</code> loops are to assign to array elements.</li>
+</ul>
+<ul>
+<li>1 of the <code>for</code> loops is to iterate a certain number of times.</li>
+</ul>
+<ul>
+<li>None of the <code>for</code> or <code>foreach</code> loops reuse an existing variable for the</li>
+</ul>
+<p>  current item.</p>
+<p>From this, it&#x27;s pretty clear that I need to focus on iterating through collections (i.e. [enumerators][</p>
+<p>] or [generators][</p>
+<p>]), and assume that the user wants a new variable for the current item. Also, iterating through multiple collections simultaneously should be fairly easy to do. This leads me to adding just one new keyword, <code>for</code>:</p>
+<p>[enumerators]: https://docs.microsoft.com/en-us/dotnet/api/system.collections.ienumerable?view=net-5.0 [generators</p>
+<p>]: http://www.python.org/dev/peps/pep-0255/</p>
+<pre class="magpie1"><code>for &lt;var&gt; &lt;- &lt;generator&gt; do
+    ...
+end</code></pre>
+<p>In addition, multiple <code>for</code> clauses can be provided (but only one <code>do</code>) to iterate through multiple collections in parallel. I still need to work out the details, but I&#x27;m thinking that the above code will be syntactic sugar for:</p>
+<pre class="magpie1"><code>// Evaluate the generator expression once.
+def _generator &lt;- Generate &lt;generator&gt;
+
+// Advance to the first item.
+_generator.MoveNext
+while Not _generator.IsDone do
+    def &lt;var&gt; &lt;- _generator.Current
+    ...
+    _generator.MoveNext
+end</code></pre>
+<p>Using that, the use cases I have can be solved by:</p>
+<pre class="magpie1"><code>// Iterating through a collection.
+for item &lt;- someList do
+    Print item
+end
+
+// Iterating multiple collections in lockstep.
+for a &lt;- someList1
+for b &lt;- someList2 do
+    Print (a == b).String
+end
+
+// Iterating backwards.
+for item &lt;- Reverse someList
+    Print item
+end
+
+// Assigning to array elements.
+for index &lt;- array.Indexes
+    array.index &lt;- 0
+end
+
+// Iterating a fixed number of times.
+for i &lt;- 50.Times
+    Print i.String
+end
+
+// Iterating through a range.
+for i &lt;- Range (10, 30)
+    Print i.String
+end</code></pre>
+<p>In those examples, <code>Reverse</code>, <code>Indexes</code>, <code>Times</code>, and <code>Range</code> can all be simple library functions. There&#x27;s nothing magical about them. This may change when the rubber meets the road as I implement it, but it feels about right so far. </p>

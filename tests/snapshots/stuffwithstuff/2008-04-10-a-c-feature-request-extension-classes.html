@@ -1,0 +1,56 @@
+<p>As you [may have noticed][ext</p>
+<p>], I&#x27;m a big fan of [extension methods][</p>
+<p>] in C# 3.0, but they aren&#x27;t without their limitations. The first one you notice when you use them is the [lack][</p>
+<p>] of extension properties. Since I like properties more than I like extension methods, this really bummed me out. So for kicks, I&#x27;d like to propose a C# feature request: <strong>Extension classes</strong>.</p>
+<p>[ext]: /2008/02/09/c-extension-methods-not-just-for-breakfast/ [extension methods</p>
+<p>]: https://docs.microsoft.com/en-us/dotnet/csharp/programming-guide/classes-and-structs/extension-methods [lack]: http://weblogs.asp.net/scottgu/archive/2007/03/13/new-orcas-language-feature-extension-methods.aspx#2019379</p>
+<h2>What&#x27;s an extension class?</h2>
+<p>An extension class is a class that adds methods, properties, etc. to another class. Given some class <code>Foo</code>:</p>
+<pre class="csharp"><code>public class Foo
+{
+    public int Value { get { return 3; } }
+}</code></pre>
+<p>My proposed syntax is:</p>
+<pre class="csharp"><code>public class FooExtensions this Foo
+{
+    public int DoubledValue
+    {
+        get { return Value * 2; }
+    }
+
+    public void Hi()
+    {
+        Console.WriteLine(&quot;hi.&quot;);
+    }
+}</code></pre>
+<p>The magic bit up there is the <code>this Foo</code>. That basically says, &quot;the <code>this</code> reference inside this class is actually of this other type <code>Foo</code>&quot;. As you can see in the implementation of <code>DoubledValue</code>, it&#x27;s accessing the <code>Value</code> property, which is defined in <code>Foo</code>.</p>
+<p>So, this solves the syntax problem for how to define an extension property. It makes sense, too, because if you&#x27;ve used extension methods, you&#x27;ve noticed that you always have to define them inside a &quot;special&quot; extension class anyway. This just moves the &quot;extension-ness&quot; indicator from the method level up to the containing class level.</p>
+<h2>What it&#x27;s not</h2>
+<p>Just to be clear, this <em>isn&#x27;t</em> the same as inheriting, partial classes, or open classes. There is no way to have a reference of type <code>FooExtensions</code>, because that class is not directly instantiable. It&#x27;s just decorating another class. Likewise, <code>FooExtensions</code> does <em>not</em> have priveleged access to <code>Foo</code>. It can only use public members just like outside code. And, of course, <code>FooExtensions</code> can&#x27;t replace any methods in Foo. No open classes.</p>
+<h2>And then?</h2>
+<p>OK, so we&#x27;ve got properties in the mix, is there anything else we could add?</p>
+<pre class="csharp"><code>public class FooExtensions this Foo
+{
+    public static SomeMethod() { /* ... */ }
+}</code></pre>
+<p>How about static methods and properties? You could say there&#x27;s no value in doing this since you have to access statics through the class name anyway, but I disagree.</p>
+<p>A design guideline that&#x27;s been floating around in [C++ land][cpp</p>
+<p>] for a long time is &quot;[prefer non-member functions over member functions][non-member</p>
+<p>]&quot;. The idea is that coupling and priveleged access to a class are bad, so if you can implement something outside of the class, that&#x27;s better. However, if doing that changes the calling convention, you&#x27;ve affected all your call sites with what should be an implementation detail. I don&#x27;t want users to have to <em>know</em> that <code>SomeMethod()</code> was implemented outside of <code>Foo</code>. That way, if I later need to move it <em>into</em> <code>Foo</code> (or vice versa), they aren&#x27;t affected.</p>
+<p>[cpp]: http://www.amazon.com/dp/0201924889 [non-member</p>
+<p>]: http://www.aristeia.com/effective-c++_frames.html</p>
+<h2>Where this is going</h2>
+<p>So, if you can move more and more <em>out</em> of <code>Foo</code>, what&#x27;s left <em>in</em> it? The answer: data and validation. <code>Foo</code> itself is the only class that can have fields. In my world, the way I&#x27;d like to design classes is like this: the core class <code>Foo</code> contains its fields and provides accessors and mutators to prevent it from being put in a bad state. <code>Foo</code> basically <em>is</em> state and state change.</p>
+<p>Almost everything else, the &quot;things you can do with a <code>Foo</code>&quot; would be pulled out into extension classes, likely in different namespaces. If you want to format a <code>Foo</code> for display, <code>UI.FooExtensions</code> will have methods for that. Need to serialize it? <code>Serialization.FooExtensions</code>.</p>
+<p>Aside from being crazy about decoupling, there&#x27;s some more reasoning behind this. It turns out that state is actually one of the [trickiest][side</p>
+<p>] parts of programming. Computer scientists have been wrestling with its [implications][memo</p>
+<p>] since the dawn of programming, and have tried [all sorts][pure</p>
+<p>] of [ways][haskell</p>
+<p>] to get around it, up to the point of trying to abolish it completely ([sort of][monad</p>
+<p>]) in &quot;pure&quot; functional languages.</p>
+<p>[side]: http://en.wikipedia.org/wiki/Side_effect_%28computer_science%29 [memo</p>
+<p>]: http://en.wikipedia.org/wiki/Memoization [pure]: http://en.wikipedia.org/wiki/Purely_functional [haskell</p>
+<p>]: http://www.haskell.org/ [monad]: http://www.haskell.org/tutorial/monads.html</p>
+<p>Now the lack of real-world use of languages like that kind of hints that state is inevitable. One of the most useful things about computers is that they remember things. However, isolating and minimizing <em>where</em> and <em>how</em> they remember things, I think, will encourage us to write software that&#x27;s easier to [reason about][ref</p>
+<p>] and maintain.</p>
+<p>[ref]: http://en.wikipedia.org/wiki/Referential_transparency_%28computer_science%29 </p>

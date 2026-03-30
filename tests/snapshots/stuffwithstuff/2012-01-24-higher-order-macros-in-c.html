@@ -1,0 +1,165 @@
+<p>My hobby project lately has been working on a little [bytecode interpreter][</p>
+<p>] for [Magpie][</p>
+<p>] in C++. As an ex-game programmer, I&#x27;m pretty sad at how rusty my C++ has gotten. To try to make things a bit easier on myself, I&#x27;ve been borrowing from the masters whenever possible. That means I usually have [V8][</p>
+<p>]&#x27;s source code open in another window.</p>
+<p>[bytecode interpreter]: https://github.com/munificent/magpie [magpie</p>
+<p>]: http://magpie-lang.org/ [v8]: https://github.com/v8/v8</p>
+<p>(Aside: if you&#x27;re interested in programming languages, it is <em>so awesome</em> that implementations like V8 and [Spidermonkey][</p>
+<p>] are open source and just a click away. Learning from them is a bit like taking your first martial arts lesson from an angry Bruce Lee, but it&#x27;s still amazing that industry-leading codebases are just there waiting for your perusal.)</p>
+<p>[spidermonkey]: http://hg.mozilla.org/mozilla-central/file/1982c882af0f/js/src</p>
+<p>In all honesty, my usual process looks a bit like:</p>
+<p>1.  &quot;Hmm, I need to code up a floobinator. V8 has one. Let me see how they do     it.&quot;</p>
+<p>2.  <em>Hunt through V8 code...</em></p>
+<p>3.  &quot;Ah, here it is.&quot;</p>
+<p>4.  OH GOD, WHAT WIZARDRY IS THIS.</p>
+<p>About 90% of it is [over my head][</p>
+<p>], but I figure 10% of v8 is still a pretty good chunk of smart. There is one clever technique I learned from them that I <em>do</em> understand: macros that take macros as arguments. That&#x27;s the point of this post.</p>
+<p>[over my head]: https://github.com/v8/v8/blob/main/src/codegen/ia32/assembler-ia32.cc</p>
+<h2>The problem</h2>
+<p>C++ is a pretty powerful language for defining abstractions which let you get rid of redundancy. Functions and methods address duplicate chunks of imperative code. Base classes let you reuse data definitions. Templates let you do... well... [almost anything][</p>
+<p>].</p>
+<p>[almost anything]: http://crazycpp.wordpress.com/category/template-metaprogramming/</p>
+<p>Even so, there are still often hunks of repetition that you can&#x27;t seem to eliminate. For example, let&#x27;s say we&#x27;re working with a language&#x27;s syntax. Typically, the [parser][</p>
+<p>] generates an [AST][</p>
+<p>] which then gets passed to the [compiler][</p>
+<p>]. The compiler walks the AST using [Ye Olde Visitor Patterne][visitor pattern</p>
+<p>] and generates some [lower-level representation][bytecode</p>
+<p>] for it.</p>
+<p>[parser]: https://github.com/munificent/finch/blob/master/src/Syntax/Parser.h [ast</p>
+<p>]: http://en.wikipedia.org/wiki/Abstract_syntax_tree [compiler]: https://github.com/munificent/finch/blob/master/src/Compiler/Compiler.h [visitor pattern</p>
+<p>]: http://en.wikipedia.org/wiki/Visitor_pattern [bytecode]: https://github.com/munificent/finch/blob/master/src/Compiler/Block.h</p>
+<p>Depending on how rich your language is, you&#x27;ll have quite a few different AST classes to represent the different syntactic elements: literals, unary operators, infix expressions, statements, flow control, definitions, etc. V8, for example, has [40][ast2</p>
+<p>] classes to cover everything you can express in JavaScript.</p>
+<p>[ast2]: https://github.com/v8/v8/blob/main/src/ast/ast.h</p>
+<p>These are relatively simple types. A (greatly!) simplified one looks a bit like:</p>
+<pre class="cpp"><code>class BinaryOpExpr : public Expression {
+  BinaryOpExpr(Expression* left, Expression* right)
+  : left(left),
+    right(right) {}
+
+  virtual void accept(AstVisitor&amp; visitor) {
+    visitor.visitBinaryOpExpr(this);
+  }
+
+  Expression* left() { return left; }
+  Expression* right() { return right; }
+
+private:
+  Expression* left;
+  Expression* right;
+};</code></pre>
+<p>Imagine thirty-something-odd more classes like this and you&#x27;ve got the right idea. There isn&#x27;t <em>too</em> much we can do in C++ to simplify these definitions themselves. Each class is different enough that it&#x27;s simplest and clearest to just write them out.</p>
+<p>Where the tedium really comes in is all of the surrounding code that <em>uses</em> these classes. First up is the aforementioned [visitor][</p>
+<p>]. To make it easy for the compiler to dispatch to different code based on the different AST classes, you typically define a class like:</p>
+<p>[visitor]: https://github.com/v8/v8/blob/main/src/ast/ast.h#L2680</p>
+<pre class="cpp"><code>class AstVisitor {
+public:
+  ~virtual AstVisitor() {}
+
+  virtual void visitBoolLiteral(BoolLiteral* expr) = 0;
+  virtual void visitNumLiteral(NumLiteral* expr) = 0;
+  virtual void visitStringLiteral(StringLiteral* expr) = 0;
+  virtual void visitUnaryOpExpr(UnaryOpExpr* expr) = 0;
+  virtual void visitBinaryOpExpr(BinaryOpExpr* expr) = 0;
+  virtual void visitAssignmentExpr(AssignmentExpr* expr) = 0;
+  virtual void visitConditionalExpr(ConditionalExpr* expr) = 0;
+  virtual void visitIfThenStmt(IfThenStmt* expr) = 0;
+  // 30 more of these, you get the idea...
+};</code></pre>
+<p>That code really <em>is</em> just repetitive boilerplate. There&#x27;s more. It&#x27;s useful to also have an enum for each AST node type so that we can also <code>switch</code> directly on the type of a node without having to go through a visitor for everything. Something like:</p>
+<pre class="cpp"><code>enum AstType {
+  kBoolLiteral,
+  kNumLiteral,
+  kStringLiteral,
+  kUnaryOpExpr,
+  kBinaryOpExpr,
+  // again, you get the idea...
+};</code></pre>
+<p>For debugging, it&#x27;s handy to be able to get a string representation for an AST node&#x27;s type too:</p>
+<pre class="cpp"><code>const char* typeString(AstType type) {
+  switch (type) {
+    case kBoolLiteral:  return &quot;BoolLiteral&quot;;
+    case kIntLiteral:   return &quot;IntLiteral&quot;;
+    case kNumLiteral:   return &quot;NumLiteral&quot;;
+    case kUnaryOpExpr:  return &quot;UnaryOpLiteral&quot;;
+    case kBinaryOpExpr: return &quot;BinaryOpLiteral&quot;;
+    // yup...
+  }
+}</code></pre>
+<p>C++&#x27;s usual abstraction facilities don&#x27;t help us here -- in all of these cases the repetition is in the <em>middle</em> of some type definition or statement. C++ is really only designed to let you abstract over entire statements (by making functions) or types (by making templates or base classes).</p>
+<h2>Let&#x27;s get dirty</h2>
+<p>But there is, of course, one grease-covered rusty tool in the C and C++ toolbox that doesn&#x27;t give a damn about actual syntactic elements: <em>the preprocessor.</em> It doesn&#x27;t even know what a statement <em>is</em>. It just sees chunks of text.</p>
+<p>More often than not, that fact makes it too blunt of an instrument to be wielded indiscriminately without risking bloodshed but here it&#x27;s just what we need. In all of our problem examples, we want to be able to say &quot;for each AST node type, generate this chunk of code but with the node&#x27;s class name inserted in a few places.&quot;</p>
+<p>Let&#x27;s try doing something like this:</p>
+<pre class="cpp"><code>#define DEFINE_VISIT(type)  \
+    virtual void visit##type(type* expr) = 0</code></pre>
+<p>With this, we can simplify our visitor class to:</p>
+<pre class="cpp"><code>class AstVisitor {
+public:
+  ~virtual AstVisitor() {}
+
+  DEFINE_VISIT(BoolLiteral);
+  DEFINE_VISIT(NumLiteral);
+  DEFINE_VISIT(StringLiteral);
+  DEFINE_VISIT(UnaryOpExpr);
+  DEFINE_VISIT(BinaryOpExpr);
+  DEFINE_VISIT(AssignmentExpr);
+  DEFINE_VISIT(ConditionalExpr);
+  DEFINE_VISIT(IfThenStmt);
+  // 30 more of these, you get the idea...
+};</code></pre>
+<p>That&#x27;s a <em>little</em> better, I guess. But not really. This trick doesn&#x27;t help at all with the enum, and only helps a little in <code>typeString()</code>. The problem is that it&#x27;s the &quot;for each AST type&quot; part of our problem where the repetition really is. It&#x27;s the <em>loop itself</em> we want to abstract over more than the loop <em>body</em>.</p>
+<p>What we want is a macro that will <em>itself</em> walk over all of the types, like:</p>
+<pre class="cpp"><code>#define AST_NODE_LIST   \
+    BoolLiteral         \
+    NumLiteral          \
+    StringLiteral       \
+    UnaryOpExpr         \
+    ...</code></pre>
+<p>But of course, that one doesn&#x27;t do anything useful. We don&#x27;t want it to just expand to the type names themselves. It needs to do something with them. But that something is different for each problem area. We need it to take a parameter that is the chunk of code that we generate for each type. Like:</p>
+<pre class="cpp"><code>#define AST_NODE_LIST(code) \
+    code(BoolLiteral)       \
+    code(NumLiteral)        \
+    code(StringLiteral)     \
+    code(UnaryOpExpr)       \
+    ...</code></pre>
+<h2>Macros taking macros... we must go deeper</h2>
+<p>Now the fun part. When we use that <code>AST_NODE_LIST</code> macro, what is that <code>code</code> argument going to be? It needs to be a thing that&#x27;s available at preprocess time, can take an argument, and can generate a chunk of code. That leaves only one answer: a macro.</p>
+<p>Until I saw this in V8, I didn&#x27;t even know you <em>could</em> pass macros to macros. But indeed you can. Using the <code>AST_NODE_LIST</code> macro we just defined, our visitor becomes:</p>
+<pre class="cpp"><code>class AstVisitor {
+public:
+  ~virtual AstVisitor() {}
+
+  #define DEFINE_VISIT(type) \
+      virtual void visit##type(type* expr) = 0
+
+  AST_NODE_LIST(DEFINE_VISIT)
+
+  #undef DEFINE_VISIT // Clean it up since we&#x27;re done with it.
+};</code></pre>
+<p>When <code>AST_NODE_LIST</code> is expanded, it expands to one call to <code>DEFINE_VISIT</code> for each of the AST node types. Then <em>those</em> are in turn expanded to define the visitor method for that type.</p>
+<p>Likewise, our enum becomes:</p>
+<pre class="cpp"><code>#define DEFINE_ENUM_TYPE(type) k##type,
+
+enum AstType {
+  AST_NODE_LIST(DEFINE_ENUM_TYPE)
+};
+
+#undef DEFINE_ENUM_TYPE</code></pre>
+<p>That&#x27;s the whole thing in its entirety. Finally, the function for converting it to a string:</p>
+<pre class="cpp"><code>#define DEFINE_TYPE_STRING(type) case k##type: return #type;
+
+const char* typeString(AstType type) {
+  switch (type) {
+    AST_NODE_LIST(DEFINE_TYPE_STRING)
+  }
+}
+
+#undef DEFINE_TYPE_STRING</code></pre>
+<p>Note that we&#x27;re using [stringification][</p>
+<p>] and [token pasting][</p>
+<p>] here to not only substitute in the AST node class&#x27;s name, but also to use it as a string literal, or to build a larger identifier (like <code>kBinaryOpExpr</code>) from it.</p>
+<p>[stringification]: https://gcc.gnu.org/onlinedocs/gcc-4.8.5/cpp/Stringification.html [token pasting</p>
+<p>]: https://gcc.gnu.org/onlinedocs/cpp/Concatenation.html</p>
+<p>This gets rid of some tedious code, but it has another nice side-effect. If you later need to add a new node class, you just add it to <code>AST_NODE_LIST</code>. Once it&#x27;s there, every place that&#x27;s using that will automatically pick it up. That way you don&#x27;t have to remember to touch <code>AstVisitor</code>, <code>AstType</code> and <code>typeString()</code>.</p>
+<p>I can&#x27;t tell if this is crazy awesome, or just plain crazy, but it&#x27;s not something you see every day. What other interesting stuff is hiding inside your favorite open source project? </p>

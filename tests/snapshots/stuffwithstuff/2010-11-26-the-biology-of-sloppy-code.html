@@ -1,0 +1,80 @@
+<p>I&#x27;m watching the [Future of Programming Languages][</p>
+<p>] panel and a point came up that really resonated with me. To the question, &quot;What is the next big trend in programming?&quot;, Guy Steele said, &quot;Maybe it&#x27;s sloppy programming.&quot;</p>
+<p>[future of programming languages]: http://www.infoq.com/presentations/Future-of-Programming-Languages</p>
+<p>It&#x27;s hard not to recoil from that and either deny it, or at least wish it weren&#x27;t true. I believe it is true. I think it&#x27;s inevitable, and, unlike probably most of my peers, I don&#x27;t think it&#x27;s a bad thing.</p>
+<h2>What does &quot;sloppy&quot; mean?</h2>
+<p>Let me clarify what I mean by &quot;sloppy&quot;. You probably have an intuition, and it&#x27;s probably right, but I&#x27;ll throw out some examples:</p>
+<ul>
+<li>  If you&#x27;re programming in Erlang, you&#x27;re doing sloppy programming. Instead of</li>
+</ul>
+<p>    writing the code &quot;right&quot; such that it never fails, you just assume parts     will and try to patch things up afterwards.</p>
+<ul>
+<li>  If you&#x27;re programming in a dynamic language, you&#x27;re doing sloppy</li>
+</ul>
+<p>    programming. Instead of carefully specifying the storage and operations for     each of your values, you just toss them in a property bag. Later, when you     need to work with that data, you assume (or empirically test) that the bits     you need are still stuffed in there somewhere.</p>
+<ul>
+<li>  If you pass around numbers as strings (or JSON, or XML) even though they can</li>
+</ul>
+<p>    be more compactly encoded in binary, you&#x27;re doing sloppy programming. If you     then parse those back into a native int at some later point and assume it     won&#x27;t overflow, you&#x27;re <em>really</em> doing sloppy programming.</p>
+<ul>
+<li>  If you <code>catch</code> an exception instead of programmatically ensuring it cannot</li>
+</ul>
+<p>    occur, you&#x27;re doing sloppy programming.</p>
+<ul>
+<li>  If you cast to <code>void*</code> or <code>Object</code> or <code>object</code> and back, you&#x27;re doing sloppy</li>
+</ul>
+<p>    programming.</p>
+<ul>
+<li>  If you&#x27;re writing glue code that transliterates some data so that two</li>
+</ul>
+<p>    programs can talk to each other instead of defining the One True Format so     they can interoperate directly, you&#x27;re doing sloppy programming.</p>
+<ul>
+<li>  If you retry when an operation times out, you&#x27;re doing sloppy programming.</li>
+</ul>
+<p>If I wrote that list right and you&#x27;re not in academia, odds are you answered &quot;yes&quot; to at least one of those. These days, we&#x27;re all sloppy programmers at least a little bit.</p>
+<h2>The super science breakdown</h2>
+<p>What I&#x27;m going to describe here will sound like an analogy, but I think it&#x27;s much closer to being literally true. I believe programming is working its way through the physical sciences.</p>
+<p>With a lot of hand-waving, you can organize the sciences roughly in order of increasing complexity: math, physics, chemistry, biology, psychology, sociology. (Or maybe in order of [decreasing hubris][hubris</p>
+<p>].) Each of these sciences takes the subject matter of the previous one and treats it as an abstraction. To a chemist, subatomic particles just <em>are</em> and they study how they interact to form chemicals. To a biologist, the organic chemicals just <em>are</em>, and they study how they interact to form living organisms. Each science is an aggregation of a more primitive one.</p>
+<p>[hubris]: http://xkcd.com/435/</p>
+<h2>The digital universe</h2>
+<p>Stepping back from the real world, let&#x27;s look at the electronic one. The core idea behind digital computers is that they&#x27;re <em>discrete</em>: instead of working with complex, continuous analog signals, they quantize and decimate that down to a fixed set of possible values. It&#x27;s the ultimate reductionism -- the analog signal running through a wire carries a nearly infinite flow of information, and we crush that down to just two possible values ticking along at a fixed clock rate.</p>
+<p>You can look at this as restarting the complexity progression. We start at the complexity of chemistry and, using a bunch of [clever engineering][gate</p>
+<p>], we build a virtual world of data simpler than even basic physics.</p>
+<p>[gate]: https://en.wikipedia.org/wiki/Logic_gate</p>
+<h3>Programmer-physicists</h3>
+<p>The first programmers were essentially physicists moments after the Big Bang, studying an artificial cosmos. At the time, the universe was so simple that all they had to work with were the program equivalents of quarks -- ones and zeroes. Their work resembled particle physics. Lots of math, lots of reasoning from first principles. Lots of building things [from scratch][</p>
+<p>].</p>
+<p>[from scratch]: http://www.youtube.com/watch?v=7s664NsLeFM</p>
+<p>As time went on and we got farther and farther from the digital Big Bang, the artificial universe got more complex. Given the computational particles that our forebears created (numeric representations, data structures, basic algorithms, etc.) we started building more complex systems.</p>
+<h3>Coder-chemists</h3>
+<p>In the early 70s, people started talking about the [software crisis][</p>
+<p>]. It became harder and harder to handle the complexity that the expanding software universe could sustain. Up to now, computers were so simple that you could write programs one byte at a time. You&#x27;d fill your magnetic tape storage before you filled your head.</p>
+<p>[software crisis]: http://en.wikipedia.org/wiki/Software_crisis</p>
+<p>As computers got more powerful (and brains didn&#x27;t), we reached a tipping point where our methods of building software were no longer effective. In other words, we couldn&#x27;t make steel and bronze one atom at a time. We needed to become chemists.</p>
+<p>This was such a distinct transition in how software was done that they considered it a generation change, embodied by so-called &quot;third-generation languages&quot;. The stress on those languages wasn&#x27;t purity or fine-grained control. It was abstraction and composability -- being able to build software out of existing parts even at the expense of purity. In other words, what a chemist does.</p>
+<p>With the transition to software chemistry, the idea that you could build software through pure reason faded to become replaced by softer empiricism. We stopped asking if the software was right in some Platonic ideal sense and started tracking the <em>rate</em> of defects. We went from &quot;purity&quot; in the mathematical sense (it either is or isn&#x27;t) to &quot;purity&quot; in the chemical sense (&quot;how pure is this compound?&quot;).</p>
+<h3>Engineer-entomologists</h3>
+<p>In the past decade, I think we&#x27;ve started stumbling through the next transition: biology. Software, of course, isn&#x27;t anywhere near as complex as a living thing yet. But it&#x27;s starting to reach a level of complexity, <em>especially</em> on the web where most code is being written today, that it&#x27;s more productive to think of code as an organic material.</p>
+<p>Where chemistry is about taking existing building blocks, tearing them apart and reassembling them, biology generally treats its subjects as more inviolable. When possible, biologists study living organisms as they are. Outside of the Island of Dr. Moreau, they refrain from building new animals from parts. A significant portion of the job of someone working in the life sciences is simply <em>maintenance</em>: keeping the living organisms in their care alive and well.</p>
+<p>And so it is becoming with software, especially web software. Most web companies have &quot;programmers&quot; whose sole job is keeping things up and running. They may not write a single line of code in production beyond test and batch scripts. They&#x27;re practicing software <em>husbandry</em> more than software <em>engineering</em>.</p>
+<p>Even the programmers who are writing production code find their work dirtier and messier than its ever been. When the code you built your software out of was just sitting on your disk, it was relatively easy to chop it up into the pieces you wanted. Now that the code you deal with is sitting on some other company&#x27;s server hidden behind a web API, it may as well be a living organism. You can interact with it, and even communicate with it, but only in its language.</p>
+<p>Where before it didn&#x27;t make sense to burn CPU cycles converting between disparate data formats, now it&#x27;s a common part of the job. A good chunk of code running on servers right now exists just to translate the grunts of one software animal to the chirps that another understands.</p>
+<h2>Why the long face?</h2>
+<p>As I see it, that&#x27;s what&#x27;s going on in the software world. What&#x27;s fascinating to me is how much emotion and morality allegedly rational programmers imbue that transition with. Really, there&#x27;s no intrinsic rightness or wrongness about any of this. Simple software is no &quot;wronger&quot; or &quot;righter&quot; than complex software. A chunk of C code isn&#x27;t more &quot;real&quot; than a bash script.</p>
+<p>But if you look at how programmers talk about their craft, the exact opposite is true. Almost any coder knows the archetype of the [Real Programmer][</p>
+<p>] -- someone who can delve all the way to the [quantum level][</p>
+<p>] of code. Meanwhile, programmers in higher-level languages (if you can even call that &quot;programming&quot;) are weak-willed fops, bedwetters barely better than humanities majors who partied through school.</p>
+<p>[real programmer]: http://en.wikipedia.org/wiki/Real_Programmer [quantum level</p>
+<p>]: http://www.pbm.com/~lindahl/mel.html</p>
+<p>In fact, the strongest evidence I can find for my claim that software is mirroring the physical sciences is how perfectly the attitudes of programmers match those of their corresponding scientists. Compare Dijkstra&#x27;s &quot;Elegance is not a dispensable luxury but a quality that decides between success and failure,&quot; to the aesthetic of your average physicist. Compare the stereotypical OOP programmer&#x27;s love of nouns and naming with the impossibly long catalogues of chemical compounds. Design patterns and chemical formulae. And today, you can look at the Rubyist waxing on about human factors and the latest methodologies at a new convention every week and see echoes of the social scientists and their endless manufacturing of new <em>-isms</em>.</p>
+<p>Where this causes problems is that there&#x27;s a noticeable correlation between personality type and job type. Ask any room full of coders how many still play with LEGOs and how many still play with modeling clay. Many programmers, especially many older ones, are predisposed to like things that are discrete, simple, and concrete. By their very nature, the work they enjoy is at the physics end of the software continuum, and as programming drifts away from that, it becomes less enjoyable for them. Their LEGOs are being ripped from their hands and replaced with Play-Doh, and they aren&#x27;t happy about it.</p>
+<p>To make matters worse, the new crop of programmers who <em>are</em> comfortable working at biological end are acquiring prestige at dizzying rate. For better or worse, many of the luminaries of the software world today are on the soft end of the spectrum. [DHH][</p>
+<p>] may have never written a linked list in his life, and he just bought a house in Italy for *[his car][car</p>
+<p>]*. If you spent your formative years painstakingly learning how to carve code one bit at a time and are now finding yourself becoming outdated, that can&#x27;t feel good.</p>
+<p>[dhh]: http://en.wikipedia.org/wiki/David_Heinemeier_Hansson [car</p>
+<p>]: http://www.autoblog.com/2010/09/07/pagani-zonda-hh-commissioner-revealed-as-30-year-old-chicago-sof/</p>
+<h2>It&#x27;s OK</h2>
+<p>I happen to be right at the chemist level: I think in OOP. I&#x27;ve done a bit of assembly but it just seems tedious to me. At the same time, Javascript and Ruby, try as I might, just don&#x27;t feel like programming. There aren&#x27;t even <em>types</em> there. How can I feel like I&#x27;m getting a real code workout if I don&#x27;t have a compiler yelling at me that I&#x27;m not doing it right?</p>
+<p>So I get the lament that programming is becoming less real and it does make me a bit sad that so much of my time programming these days is just jamming chunks of code together. But it doesn&#x27;t get me down as much as it does some people, because I know that programming isn&#x27;t <em>moving</em> towards softer sciences. It&#x27;s simply <em>expanding</em>.</p>
+<p>For as long as we&#x27;ll need physicists, we&#x27;ll still need low-level coders. The software universe is getting bigger and it can accomodate scientists of all persuasions. And instead of thinking that programming is getting sloppier, I tell myself it&#x27;s getting more <em>organic</em>. </p>

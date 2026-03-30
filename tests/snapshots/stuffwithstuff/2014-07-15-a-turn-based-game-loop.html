@@ -1,0 +1,257 @@
+<p>&lt;style&gt; canvas {   padding: 6px;   background: #222;   margin: 10px auto;   max-width: 90%;   display: block; } &lt;/style&gt;</p>
+<p>Now that [my roguelike][hauberk</p>
+<p>] written in [Dart][</p>
+<p>] is [open source][hauberk code</p>
+<p>], I wanted to talk about a piece of it that I put a lot of time into. Well, I actually poured way too much of my life into lots of parts of this game. Maybe I&#x27;ll write about those too, but for now let&#x27;s start where most games start: with the <em>game loop</em>.</p>
+<p>[hauberk]: http://munificent.github.io/hauberk/ [hauberk code</p>
+<p>]: https://github.com/munificent/hauberk [dart]: http://dartlang.org</p>
+<p>&lt;figure&gt;   &lt;img class=&quot;framed&quot; src=&quot;/image/2014/08/snapshot.jpg&quot;&gt;   &lt;figcaption&gt;Here&#x27;s the game I&#x27;m talking about. You can play it   &lt;a href=&quot;http://munificent.github.io/hauberk/&quot;&gt;here&lt;/a&gt;. Don&#x27;t get freaked   out by all of the text below! There&#x27;s interactive demos just a few paragraphs   down!&lt;/figcaption&gt; &lt;/figure&gt;</p>
+<p>I&#x27;m [a bit obsessed][gpp</p>
+<p>] with software architecture in games. Since this roguelike is my hobby project, I&#x27;ve fully indulged myself. You know that guy who always wanted to be a railroad engineer but ended up an accountant or something, and then spends years in his basement endlessly tinkering on a model railroad? I&#x27;m like that guy, but for software architecture. And roguelikes.</p>
+<p>[gpp]: http://gameprogrammingpatterns.com/</p>
+<p>That may be the nerdiest thing I&#x27;ve ever written, which is really saying something.</p>
+<p>I&#x27;ve refactored and rewritten the game loop more times than I can count (there&#x27;s probably some &quot;iteration&quot; metajoke hiding in this sentence), and I won&#x27;t drag you through the whole history of it. Instead, we&#x27;ll go through its current form, building it up a piece at a time.</p>
+<p>I have a couple of high-level goals:</p>
+<ul>
+<li>  <strong>The game engine should be <em>strictly</em> separated from the user interface.</strong></li>
+</ul>
+<p>    I&#x27;ve gone back and forth between a pixel art UI and a more old school     ACSII-based one, and it&#x27;s important for me that the engine supports both.     (The current Dart version is all ASCII-based right now, ironically rendered     using the canvas API.) That means the engine can&#x27;t be coupled to any details     of how the game is displayed to the user. Like a business app, I want a real     model/view separation.</p>
+<ul>
+<li>  <strong>Monsters and player-controlled characters should be treated uniformly.</strong></li>
+</ul>
+<p>    Most of the engine just deals with &quot;[actors][</p>
+<p>]&quot;, the superclass of both     [<code>Monster</code>][monster</p>
+<p>] and the player-controlled, gender-nonspecific     [<code>Hero</code>][hero</p>
+<p>]. I want to minimize special treatment that the player&#x27;s     avatar receives and treating it like just another entity in the game does     that implicitly.</p>
+<p>[actors]: https://github.com/munificent/hauberk/blob/23bbc1feb2636a846b87eb0a95a2bbf3fbdc2184/lib/src/engine/actor.dart#L46 [monster</p>
+<p>]: https://github.com/munificent/hauberk/blob/23bbc1feb2636a846b87eb0a95a2bbf3fbdc2184/lib/src/engine/monster.dart#L21 [hero]: https://github.com/munificent/hauberk/blob/23bbc1feb2636a846b87eb0a95a2bbf3fbdc2184/lib/src/engine/hero/hero.dart</p>
+<h2>Slicing up the game loop</h2>
+<p>Hauberk, like most roguelikes, is a <em>turn-based</em> game. Each actor in the game makes a move one at a time. When it&#x27;s the player&#x27;s turn, all of the monsters halt, awkwardly motionless like the world&#x27;s strangest game of freeze tag, until after the player does their thing.</p>
+<p>At the core of the game engine is the [game loop][</p>
+<p>]. Its job is to iterate over the actors in the level and tell each to take its turn. In a simple game, it would look something like:</p>
+<p>[game loop]: http://gameprogrammingpatterns.com/game-loop.html</p>
+<pre class="dart"><code>void gameLoop() {
+  while (stillPlaying) {
+    for (var actor in actors) {
+      actor.update();
+    }
+  }
+}</code></pre>
+<p>However, since the engine is decoupled from the user interface, it is driven externally. The engine has a main [<code>Game</code>][game</p>
+<p>] class. The UI owns an instance of that and tells it to process. The engine only processes one &quot;step&quot; of gameplay before returning control back to the UI.</p>
+<p>[game]: https://github.com/munificent/hauberk/blob/fe0bdf614d5d00a5235b7a82d9d38c928928d34c/lib/src/engine/game.dart</p>
+<p>(I&#x27;m being intentionally vague about &quot;step&quot; here. If I get a chance, I&#x27;ll write a follow-up post about how the engine&#x27;s game loop and the browser event loop interact. It&#x27;s pretty tricky.)</p>
+<p>What this means is that <code>Game</code> needs to track the last actor who took a turn so it can pick up where it left off. Something like:</p>
+<pre class="dart"><code>class Game {
+  final actors = &lt;Actor&gt;[];
+  int _currentActor = 0;
+
+  void process() {
+    actors[_currentActor].update();
+    _currentActor = (_currentActor + 1) % actors.length;
+  }
+}</code></pre>
+<p>Astute readers like yourself are probably thinking this sounds like a good case for a [generator][</p>
+<p>]. Indeed, in the previous C# incarnation of my game, [I did exactly that][amaranth</p>
+<p>]. When Dart gets generators, I&#x27;ll probably use them. In the meantime, it&#x27;s just a bit more verbose.</p>
+<p>[generator]: http://en.wikipedia.org/wiki/Generator_(computer_programming) [amaranth</p>
+<p>]: /2008/11/17/using-an-iterator-as-a-game-loop/</p>
+<h2>Actions for actors</h2>
+<p>We&#x27;ve got a little resumable game loop now. When each actor&#x27;s turn comes up, its <code>update()</code> is called and the actor does whatever it does. A monster might pick a direction to walk. Next, the consequences of that have to be handled. The monster may walk into another actor, which triggers combat. The monster also needs to handle walking into a wall or a door.</p>
+<p>All told, even for a simple bit of behavior like &quot;take a step&quot;, there&#x27;s a decent amount of logic, but you&#x27;ll note that all of that applies equally well to monsters and heroes. Brave warriors can stumble into walls too, and the consequences are the same. It would be good to share code for this.</p>
+<p>The obvious answer is to push the walking code up into the shared <code>Actor</code> base class. But if we do that for everything -- walking, melee combat, ranged attacks, inventory management, magic, etc. -- we end up with an <code>Actor</code> class that contains damn near the whole game. Super gross.</p>
+<p>Instead, we&#x27;ll make a classic game architecture decision. We&#x27;ll separate <em>deciding</em> what behavior to perform from <em>executing</em> the behavior. In other words, we&#x27;ll use the [Command pattern][</p>
+<p>]. In Hauberk, these are called <em>actions</em>.</p>
+<p>[command pattern]: http://gameprogrammingpatterns.com/command.html</p>
+<p>The game loop asks each actor to give it an action, then it tells the action to execute <em>itself</em>, like:</p>
+<pre class="dart"><code>void process() {
+  var action = actors[_currentActor].getAction();
+  action.perform();
+  _currentActor = (_currentActor + 1) % actors.length;
+}</code></pre>
+<p>There are different action classes for each atomic thing an actor in the world can do. There is a [<code>WalkAction</code>][walk</p>
+<p>], [<code>OpenDoorAction</code>][open</p>
+<p>], [<code>EatAction</code>][eat</p>
+<p>], etc.</p>
+<p>[walk]: https://github.com/munificent/hauberk/blob/53719994a29ba7b750bb78643f8b92d1f5516685/lib/src/engine/action_base.dart#L109 [open</p>
+<p>]: https://github.com/munificent/hauberk/blob/53719994a29ba7b750bb78643f8b92d1f5516685/lib/src/engine/action_base.dart#L154 [eat]: https://github.com/munificent/hauberk/blob/53719994a29ba7b750bb78643f8b92d1f5516685/lib/src/engine/action_base.dart#L192</p>
+<p>This architecture pulls all of that behavior out of the base <code>Actor</code> class. Even better, it separates all of the actions from <em>each other</em>. If you&#x27;re adding or changing a thing that actors can do, you can just poke at one isolated little action class. It feels nice and decoupled and it&#x27;s easy to add new actions to the game. (As of today, there are nineteen different actions, and I expect to add a bunch more.)</p>
+<p>It also, of course, helps us treat monsters and heroes uniformly. Since the <code>Action</code> classes all work on instances of <code>Actor</code>, they can all be used by monsters and heroes alike. (There are some exceptions since heroes have some capabilities monsters don&#x27;t have. Right now, monsters don&#x27;t have inventory so all of the inventory management actions don&#x27;t apply to them.)</p>
+<h2>Acting at speed</h2>
+<p>We&#x27;ve got a basic loop working now, but our game is a bit <em>too</em> turn-based. Every monster and the hero all proceed in lockstep. You move one step, they all move one step, kind of like the ancient [Robots][</p>
+<p>] game. You can never outrun or be outrun. See for yourself:</p>
+<p>&lt;figure&gt;   &lt;canvas id=&quot;same-speed&quot; tabindex=&quot;1&quot;&gt;Sorry, you need canvas support for this   demo.&lt;/canvas&gt;   &lt;figcaption&gt;Use arrow keys or &lt;code&gt;iopkl;,./&lt;/code&gt; to move. Press   &lt;code&gt;t&lt;/code&gt; to teleport.&lt;/figcaption&gt; &lt;/figure&gt;</p>
+<p>To fix that, we want actors to move at different <em>speeds</em>.</p>
+<p>[robots]: http://en.wikipedia.org/wiki/Robots_(BSD_game)</p>
+<p>Of course, this is &quot;speed&quot; in the turn-based sense, not literally moving quicker in realtime. What it means is that a &quot;faster&quot; actor gets to take turns more <em>frequently</em> than other actors. If you&#x27;re twice as fast as a green slime, then you&#x27;ll get two turns for every one it receives.</p>
+<p>This mechanic is <em>de rigueur</em> in roguelikes, and the literature is [rife][speed 1</p>
+<p>] [with][speed 2</p>
+<p>] [ways][speed 3</p>
+<p>] [to][speed 4</p>
+<p>] implement it. The system I&#x27;m using is almost exactly [what Angband uses][angband speed</p>
+<p>], because it&#x27;s awesome.</p>
+<p>[speed 1]: http://www.roguebasin.com/index.php?title=An_elegant_time-management_system_for_roguelikes [speed 2</p>
+<p>]: http://www.roguebasin.com/index.php?title=A_priority_queue_based_turn_scheduling_system [speed 3]: http://doryen.eptalys.net/forum/index.php?topic=1596.0 [speed 4</p>
+<p>]: http://ironypolicy.wordpress.com/2014/02/05/possession-2-speed-systems-in-roguelikes/ [angband speed]: http://www.faqs.org/faqs/games/roguelike/angband-faq/</p>
+<p>It works like this: Every actor has an <em>energy</em> level. When the game loop reaches an actor, it grants the actor a bit of energy. When the actor&#x27;s energy reaches a certain threshold, it has enough to take a turn and perform an action. Otherwise, the game loop just moves on to the next actor. It may take several cranks through the game loop before an actor accumulates enough juice to actually take a turn. (And, in fact, for all but the fastest actors, it does.)</p>
+<p>When the actor performs an action, that burns energy, and they&#x27;re back in the &quot;waiting to get enough energy to go&quot; state. Right now, all actions consume the same amount of energy, which means every action takes the same amount of &quot;time&quot; to perform. I <em>could</em> vary this so that, for example, archers could shoot arrows more frequently than they swing a sword.</p>
+<p>The way <em>speed</em> comes into play is simple: <em>faster actors get more energy each turn.</em> That means they cross the threshold in fewer revolutions of the game loop, so they get to move more often. It&#x27;s as simple as that.</p>
+<p>The neat thing about it is that by accumulating energy over several turns, you can have actors that move at arbitrary fractions of each other&#x27;s speed. You could have an actor that gets five moves for every seven moves another actor gets if you wanted. (Of course, what you&#x27;d see during game play is that every now and then the second actor would get a double turn. It&#x27;s just that the &quot;every now and then&quot; averages out to 7/5 over time.)</p>
+<p>Enough verbiage, let&#x27;s see it in action:</p>
+<p>&lt;figure&gt;   &lt;canvas id=&quot;speed-bars&quot; tabindex=&quot;2&quot;&gt;Sorry, you need canvas support for this   demo.&lt;/canvas&gt;   &lt;figcaption&gt;Same controls before but the game loop is slowed down so you can   watch it parcel out energy.&lt;/figcaption&gt; &lt;/figure&gt;</p>
+<p>The <code>&gt;</code> points to the actor whose turn it is. It&#x27;s usually stuck waiting on you. After you make a move, you can watch the game loop race around, doling out bits of energy. When an actor&#x27;s bar reaches the right edge, it takes a move and the bar resets.</p>
+<p>The cool thing about this system is that applies to all <em>actors</em>. Some game engines update the hero separately from monsters in the main game loop, but that makes speed much trickier to handle. By treating the hero as just another actor, the hero can be both slower and faster than other monsters automatically.</p>
+<h2>The one special thing about heroes</h2>
+<p>Treating the hero as just another actor is mostly swell, but there <em>is</em> one thing about heroes that makes them unique -- they&#x27;re controlled by the player. The game loop I showed runs fine as long as actors generate their own actions. That&#x27;s true in the case of AI-driven monsters, but the hero can&#x27;t see through your glassy computer screen and discern your intentions through cyber-telepathy. It needs user input.</p>
+<p>We already have two constraints that make this harder:</p>
+<p>1.  Because we want to separate the engine from the user interface, the engine&#x27;s     game loop can&#x27;t directly call into input handling code.</p>
+<p>2.  Because the game runs in a browser, it can&#x27;t <em>block</em> waiting for user input.     The browser don&#x27;t play &#x27;dat. You have to return to the event loop and let     the browser tell <em>you</em> when an event comes in.</p>
+<p>When the game loop asks a hero for its action, the hero can&#x27;t just stop the game and wait for the player to push a button. Instead, we let the user interface <em>inject</em> input into the game. The input handling code can create an action for the hero <em>ex-nihilo</em> and jam it in the engine&#x27;s piehole, like this:</p>
+<pre class="dart"><code>void handleInput(Keyboard keyboard) {
+  switch (keyboard.lastPressed) {
+    case KeyCode.G:
+      game.hero.setNextAction(new PickUpAction())
+      break;
+
+    case KeyCode.I:         walk(Direction.NW); break;
+    case KeyCode.O:         walk(Direction.N); break;
+    case KeyCode.P:         walk(Direction.NE); break;
+    case KeyCode.K:         walk(Direction.W); break;
+    case KeyCode.L:         walk(Direction.NONE); break;
+    case KeyCode.SEMICOLON: walk(Direction.E); break;
+    case KeyCode.COMMA:     walk(Direction.SW); break;
+    case KeyCode.PERIOD:    walk(Direction.S); break;
+    case KeyCode.SLASH:     walk(Direction.SE); break;
+  }
+}
+
+void walk(Direction dir) {
+  game.hero.setNextAction(new WalkAction(dir));
+}</code></pre>
+<p>That call to <code>setNextAction()</code> stuffs the given action into a field in the hero. When the game loop asks the hero what it wants to do, it barfs the action back up:</p>
+<pre class="dart"><code>class Hero extends Actor {
+  Action _nextAction;
+
+  void setNextAction(Action action) {
+    _nextAction = action;
+  }
+
+  Action getAction() {
+    var action = _nextAction;
+    // Only perform it once.
+    _nextAction = null;
+    return action;
+  }
+
+  // Other heroic stuff...
+}</code></pre>
+<p>(In the actual game, there&#x27;s actually a level of indirection here to handle [multi-step behaviors like running][running</p>
+<p>], but we&#x27;ll ignore that here.)</p>
+<p>[running]: https://github.com/munificent/hauberk/blob/11c5ca5d258dfdae20118c7a4dcc82e50ceb67de/lib/src/engine/hero/hero.dart#L301</p>
+<p>This keeps the engine from reaching out to the user interface and lets the UI pass input to the engine at its leisure. The only problem is what happens when the game engine is told to process the hero&#x27;s turn and the UI hasn&#x27;t given it an input yet.</p>
+<p>To handle that, the loop just checks for the actor failing to cough up an action. When that happens, it bails and returns control back to the user interface:</p>
+<pre class="dart"><code>void process() {
+  var action = actors[_currentActor].getAction();
+
+  // Don&#x27;t advance past the actor if it didn&#x27;t take a turn.
+  if (action == null) return;
+
+  action.perform();
+  _currentActor = (_currentActor + 1) % actors.length;
+}</code></pre>
+<p>If the interface tells the game engine to process but hasn&#x27;t given instructions to the hero, the engine does nothing and bounces control back to the UI. Note how <code>setNextAction()</code> can be called at any point in time. This works seamlessly with the speed system without the UI having to be aware of it. It just throws hero actions at the engine and tells it to process. The engine takes care to ensure the simulation only ratchets forward at the right time.</p>
+<p>In fact, now that I think about it, if you had multiple player-controlled heroes driven by different inputs, it would automatically handle that too. They could even be coming over a network and the engine won&#x27;t care. Groovy.</p>
+<p>The way this interacts with the browser&#x27;s own event loop is actually a good bit more complex than this when you take into account visual effects, but I think I&#x27;ll have to save that for another post. For now, let&#x27;s keep our attention on the pristine confines of the engine.</p>
+<h2>Fat fingers</h2>
+<p>We&#x27;re pretty far along with our game loop now. We&#x27;ve got it doing the stuff it <em>needs</em> to do, so we can start looking at making the game more pleasantly usable. Usability means <em>fallibility</em>. People make mistakes, and usability is about accommodating that.</p>
+<p>For example, let&#x27;s say the player tries to make the hero walk into a wall. Right now, that creates a walk action. When the action is processed, it prevents the hero from walking through the wall, but it still <em>burns that turn</em>. If the hero is trying to run away from a foul beastie, that slip up could cost the hero their life. Some games are OK with that, but I don&#x27;t want to be that punishing. Roguelikes are unforgiving enough as it is.</p>
+<p>The demos so far work this way now. Go back and try running into a wall. See how your mortal enemies approach in the midst of your ineptitude? That&#x27;s what we want to fix. When the player tries to perform an action that isn&#x27;t possible, we want to make sure we don&#x27;t waste a turn on it.</p>
+<p>One way to handle that would be to validate the turn in the user interface. In the input handling, we check the tile that the hero wants to walk into and make sure it&#x27;s a floor tile. If it isn&#x27;t, the user interface shows an error and doesn&#x27;t send an action to the game. From the engine&#x27;s perspective, it only receives sanitized, correct user actions.</p>
+<p>But doing that validation is actually pretty complex. Maybe the hero has an insubstantiation spell and <em>can</em> walk through walls right now. Maybe the tile isn&#x27;t floor but is something the hero can tunnel through, but only if they have a shovel in their inventory.</p>
+<p>What I&#x27;m describing are <em>game mechanics</em>, and game mechanics belong in the engine. In particular, most of them belong in actions. We&#x27;ll put the solution to this problem in there too. When an action is processed, we&#x27;ll let it return a value indicating success. If it fails, the game loop considers it to have never happened. It&#x27;s as simple as:</p>
+<pre class="dart"><code>void process() {
+  var action = actors[_currentActor].getAction();
+  if (action == null) return;
+
+  var success = action.perform();
+
+  // Don&#x27;t advance if the action failed.
+  if (!success) return;
+
+  _currentActor = (_currentActor + 1) % actors.length;
+}</code></pre>
+<p>This makes the engine more robust: you can throw arbitrary actions at it and it will handle them gracefully. It also keeps all of the code for a single mechanic, including validation, in one place: in the relevant action. Yay for encapsulation!</p>
+<p>Now, try braining yourself against the dungeon&#x27;s stone boundary:</p>
+<p>&lt;figure&gt; &lt;canvas id=&quot;safe-fail&quot; tabindex=&quot;3&quot;&gt;Sorry, you need canvas support for this demo.&lt;/canvas&gt; &lt;/figure&gt;</p>
+<h2>Do what I mean, not what I said</h2>
+<p>Success/failure handles cases where the action the player picked is totally bogus, but sometimes the game can infer out what they were <em>trying</em> to do. For example, if you try to make the hero walk into a closed door instead of using the dedicated &quot;open door&quot; command, odds are pretty good you want to open the damned door. Likewise, if you try to walk into a monster, that&#x27;s a good time to consider swinging a sword.</p>
+<p>I know this sounds obvious, but you&#x27;d be surprised how many roguelikes don&#x27;t do this. Improving usability is one of my main goals for my game, so I care about this stuff. I&#x27;ve got a pretty simple solution too.</p>
+<p>When an action is validating itself, it can fail outright like we saw, but it can also respond with an <em>alternate action</em>. It lets the action say, &quot;no, you really mean this&quot;.</p>
+<p>Since the <code>perform()</code> method on <code>Action</code> can return success, failure, or another action, we&#x27;ll make a little class to wrap that up:</p>
+<pre class="dart"><code>class ActionResult {
+  static const success = ActionResult(true);
+  static const failure = ActionResult(false);
+
+  /// An alternate [Action] that should be performed instead of
+  /// the one that failed.
+  final Action alternative;
+
+  /// `true` if the [Action] was successful and energy should
+  /// be consumed.
+  final bool succeeded;
+
+  const ActionResult(this.succeeded)
+  : alternative = null;
+
+  const ActionResult.alternate(this.alternative)
+  : succeeded = true;
+}</code></pre>
+<p>When an action is executing, it returns <code>ActionResult.success</code> to say everything went fine, <code>ActionResult.failure</code> to say nothing happened, or it can return an <code>ActionResult</code> with <code>.alternate</code> pointing to a new action to perform instead.</p>
+<p>The game loop processes that:</p>
+<pre class="dart"><code>void process() {
+  var action = actors[_currentActor].getAction();
+  if (action == null) return;
+
+  while (true) {
+    var result = action.perform();
+    if (!result.succeeded) return;
+    if (result.alternate == null) break;
+    action = result.alternate;
+  }
+
+  _currentActor = (_currentActor + 1) % actors.length;
+}</code></pre>
+<p>We do this in a loop because an alternate may itself return an alternate, so we keep trying until we bottom out on an action that succeeds or fails. This turns out to be a handy feature for a number of things in the full game:</p>
+<ul>
+<li>  When you use an item, the &quot;use item&quot; action looks up the specific thing the</li>
+</ul>
+<p>    item does (shoot a fireball, teleport, etc.) and returns that as an     alternate. When you &quot;use&quot; an equippable item, it returns the &quot;equip&quot; action     as an alternate.</p>
+<ul>
+<li>  If an actor &quot;walks&quot; but in no direction, it becomes a &quot;rest&quot; action which</li>
+</ul>
+<p>    regains a bit of health.</p>
+<ul>
+<li>  If an actor walks into a door, it returns the &quot;open door&quot; action as an</li>
+</ul>
+<p>    alternate.</p>
+<ul>
+<li>  If an actor tries to walk into another, it returns the &quot;attack&quot; melee action</li>
+</ul>
+<p>    as an alternate.</p>
+<p>The last three are particularly handy because they&#x27;re equally applicable to monsters. The monster AI code doesn&#x27;t have to check for doors or opponents. Instead it just tries to make the monster walk where it wants to go and the action system handles opening doors to get there and attacking the hero when it reaches them. When the monster can&#x27;t figure out where to go, it rests automatically.</p>
+<p>Believe me, anything you can do to simplify your AI code is a good idea. Enough jibber-jabber, let&#x27;s see it in action:</p>
+<p>&lt;figure&gt; &lt;canvas id=&quot;alternate&quot; tabindex=&quot;4&quot;&gt;Sorry, you need canvas support for this demo.&lt;/canvas&gt; &lt;/figure&gt;</p>
+<p>Notice the little room has a door now. If you try to walk into it, the game loop will go through the walk&#x27;s alternate action to do the open. You can close it by pressing &quot;C&quot; when standing next to it.</p>
+<p>The wizard is smart enough to open doors too (sorry, troll and slug, no Mensa membership for you) and no changes to the pathfinding AI were needed to enable it. He just tries to walk <em>through</em> the door and miraculously succeeds.</p>
+<h2>The end... <em>or is it?</em></h2>
+<p>Crap, I&#x27;ve already burned three thousand words of your attention and there&#x27;s still cool stuff to talk about! I&#x27;m gonna have to split this into a two parter.</p>
+<p>What we have now is a pretty solid (in my opinion, naturally) game loop. Defining behavior in actions lets us treat the player-controlled hero and monsters uniformly. We&#x27;ve got a flexible speed system, and it&#x27;s all nicely separated from the user interface.</p>
+<p>If you&#x27;re building a relatively simple turn-based game, this is probably enough.</p>
+<p>But, while ASCII-art-based roguelikes aren&#x27;t known for their visual spectacle, I want something that with a bit more pizazz than what I described here can dish up. I want the player to see an arrow arc across the room before plunking into the meaty face of a troll. I want fireballs to flare outwards in a ring of death. And when that flame touches incendiary items laying on the ground, those should in turn trigger a cascading conflagration.</p>
+<p>The game loop I have in the full game can do that. When I can find the time to carve out a few more standalone demos and hack up some prose, I&#x27;ll show you how. In the meantime, the code for the game is [here][hauberk code</p>
+<p>], and the code for the demos in this post are [here][demos</p>
+<p>].</p>
+<p>If you want to try out the game, you can [play it here][hauberk</p>
+<p>].</p>
+<p>[demos]: https://github.com/munificent/a-turn-based-game-loop</p>
+<p>&lt;script type=&quot;application/dart&quot; src=&quot;/code/2014-07-15-a-turn-based-game-loop/main.dart&quot;&gt;&lt;/script&gt; &lt;script src=&quot;/code/2014-07-15-a-turn-based-game-loop/packages/browser/dart.js&quot;&gt;&lt;/script&gt; </p>

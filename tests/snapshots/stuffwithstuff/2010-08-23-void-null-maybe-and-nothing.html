@@ -1,0 +1,70 @@
+<p>I&#x27;m hard at work on a proof-of-concept for the new [Magpie][</p>
+<p>]. While I&#x27;ve got some more work to do before I can start getting into the really interesting parts of the language, I have one piece working now that I think is kind of cool, and that&#x27;s... <em>nothing</em>.</p>
+<p>[magpie]: https://magpie-lang.org/</p>
+<h2>Absence and failure</h2>
+<p>Every programming language has to provide a mechanism for two kinds of absence: when a function <em>always</em> returns nothing, and when it <em>sometimes</em> returns nothing. C has the <code>void</code> type for the former. A function that just performs some side-effect like printing to the screen is declared to return <code>void</code>, like:</p>
+<pre class="c"><code>void sayHi() {
+  printf(&quot;hi!&quot;);
+}</code></pre>
+<p>The compiler will check to make sure you don&#x27;t do something dumb like:</p>
+<pre class="c"><code>int a = sayHi();</code></pre>
+<p>Failing to return <em>sometimes</em> is a lot trickier. Consider a function that takes a path and returns a handle to a file. If there is no file at the given path, there&#x27;s no <code>File</code> it can return so it needs to fail somehow. The way most OOP languages like Java and C# handle this is by returning <code>null</code>:</p>
+<pre class="java"><code>File openFile(String path) {
+  if (isValid(path)) {
+    return new File(path);
+  } else {
+    return null;
+  }
+}</code></pre>
+<p>For any reference type (like <code>File</code>), a variable can have a valid value, or it can be <code>null</code>. In other words, <code>null</code> is this magical value that exists as a member of every type. &quot;Hey there&quot; is a string, and <code>null</code> is a string. `new File(&quot;foo/bar.txt&quot;)<code> is a file, and </code>null` is a file.</p>
+<h2>Meta-failure</h2>
+<p>The real problem with this is that now you&#x27;ve lost the ability to declare that a function <em>won&#x27;t</em> fail. <em>Any</em> function that returns a reference type can in principle return <code>null</code> even though most never do. To be safe, you end up having to check for it everywhere. Even then, things slip through causing tons of real-world bugs.</p>
+<p>Tony Hoare, the guy who gets the dubious honor of inventing <code>null</code> calls this his [&quot;billion dollar mistake&quot;][billion</p>
+<p>]. I don&#x27;t have a billion dollars, so I don&#x27;t want to make this mistake in Magpie.</p>
+<p>[billion]: http://lambda-the-ultimate.org/node/3186</p>
+<h2>Maybe another solution</h2>
+<p>Fortunately, other languages don&#x27;t have this problem. The ML family of languages, including Haskell and F#, <em>don&#x27;t</em> allow <code>null</code> as a value for every type. If you have a variable of type Foo, you can sleep soundly at night knowing it will only and always contain a valid value of type Foo.</p>
+<p>But now we&#x27;re back to our first problem. How would we implement <code>openFile()</code> then? It can&#x27;t return <code>File</code> because it might not always find the file. ML languages handle this with a special type called [<code>Maybe</code>][maybe</p>
+<p>] (Haskell) or [<code>Option</code>][option</p>
+<p>] (ML and everything else). This is a special wrapper that may optionally contain a value of some type (hence the name). Our <code>openFile()</code>, instead of returning <code>File</code>, will return <code>File option</code>.</p>
+<p>[maybe]: http://www.haskell.org/onlinereport/maybe.html [option</p>
+<p>]: http://www.standardml.org/Basis/option.html</p>
+<p>Crisis averted. The only trick is that if you&#x27;re the code calling <code>openFile()</code> you&#x27;ve got this option thing now instead of a <code>File</code>. How do you get the file back out? ML languages use something called &quot;pattern matching&quot;, which is basically a pimped out <code>switch</code> statement. I won&#x27;t go into it here, but it&#x27;s swell.</p>
+<h2>Wasn&#x27;t I talking about <em>my</em> language?</h2>
+<p>Ah, yes. Magpie. Where was I? OK, so which path does Magpie follow? Well… neither, actually. So Java and C# use <code>void</code> for functions that never return a value and <code>null</code> for functions that might sometimes fail. ML-family languages use something called &quot;Unit&quot; instead of <code>void</code> and <code>Option</code>/<code>Maybe</code> for occasional failure.</p>
+<p>Magpie has one concept that it uses for both: <code>nothing</code>. In Magpie, there is a single value called <code>nothing</code> that represents the absence of a value. If you have a function that just has side-effects, that&#x27;s what it returns implicitly. For example, this function returns <code>nothing</code>:</p>
+<pre class="magpie"><code>var sayHi(-&gt;)
+  print(&quot;hi&quot;)
+end</code></pre>
+<p>The <code>(-&gt;)</code> is the type signature. In this case, it takes no arguments (there&#x27;s nothing to the left of the arrow) and it returns nothing (there&#x27;s nothing to the right). If we wanted to be more explicit, we could say:</p>
+<pre class="magpie"><code>var sayHi(-&gt; Nothing)
+  print(&quot;hi&quot;)
+end</code></pre>
+<p>Note how &quot;Nothing&quot; is capitalized. <code>nothing</code> is the value, <code>Nothing</code> is its type. There is only one value of type <code>Nothing</code> and its name is <code>nothing</code>.</p>
+<p>That much is easy. What about <code>openFile()</code>? If I had a billion dollars to blow, it would be:</p>
+<pre class="magpie"><code>var openFile(path String -&gt; File)
+  if path valid? then File new(path)
+  else nothing
+end</code></pre>
+<p>We&#x27;d let <code>nothing</code> silently masquerade as a file. But <code>nothing</code> isn&#x27;t a file, it&#x27;s a <code>Nothing</code>. So the above program won&#x27;t type check. What we need is a way to say that <code>openFile()</code> can return a String <em>or nothing</em>.</p>
+<h2>Or some other solution</h2>
+<p>I&#x27;m all about the obvious solution, so I just took that literally. So Magpie has <em>or types</em>. (I&#x27;m guessing there may be other names for them in the literature. I know I didn&#x27;t invent them.) A correct version of <code>openFile()</code> looks like:</p>
+<pre class="magpie"><code>var openFile(path String -&gt; File | Nothing)
+  if path valid? then File new(path)
+  else nothing
+end</code></pre>
+<p>My hope is that that&#x27;s pretty clear and easy to understand: <code>openFile</code> takes a string and returns a file or nothing. It reads just like you&#x27;d say it.</p>
+<h2>But I don&#x27;t want nothing!</h2>
+<p>There&#x27;s one last little problem we&#x27;re left with though. If we&#x27;re the ones <em>calling</em> <code>openFile()</code> now, what do we do with what we got back? If we try this:</p>
+<pre class="magpie"><code>var myFile = openFile(&quot;path/to/file.txt&quot;)
+myFile read</code></pre>
+<p>We&#x27;ll get a compile error on the second line. You can&#x27;t call <code>read</code> on <code>nothing</code> and <code>myFile</code> might be just that. To address that, Magpie has [a little thing called <code>let</code>][let</p>
+<p>]. It&#x27;s a lightweight version of full pattern matching (which the old C# Magpie has, and the new Java Magpie will at some point) to make this exact case easy to work with. It looks like this:</p>
+<p>[let]: /2009/12/26/conditional-binding-with-let-in-magpie/</p>
+<pre class="magpie"><code>let myFile = openFile(&quot;path/to/file.txt&quot;) then
+  myFile read
+else
+  print(&quot;Couldn&#x27;t open file!&quot;)
+end</code></pre>
+<p>A <code>let</code> combines conditional logic like <code>if</code> with defining a variable. First, it evaluates the right-hand expression (<code>openFile(...)</code> in this case). If, and only if, that expression doesn&#x27;t return <code>nothing</code>, it will bind the result to a new variable (<code>myFile</code> here), whose type is the type of the expression without the <code>| Nothing</code> clause. Then it evaluates the expression after <code>then</code>.</p>
+<p>The nice part is that <code>myFile</code> only exists within the body of the <code>then</code> clause, and only if it isn&#x27;t <code>nothing</code>. There&#x27;s no way to try to call <code>read</code> on something that isn&#x27;t a valid <code>File</code>. We&#x27;re totally type-safe while still keeping things pretty simple and easy to use. </p>

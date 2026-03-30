@@ -1,0 +1,50 @@
+<p>This blog has been collecting dust for several months now. Not because I haven&#x27;t been doing anything, quite the opposite. I&#x27;ve been spending all my free time hacking on a little programming language project: Magpie.</p>
+<p>Yesterday, I finally [put it online where people can get to it][repo</p>
+<p>]. Feel free to have a look, although it&#x27;s got a good ways to go before I&#x27;d describe it as really useful.</p>
+<p>[repo]: https://github.com/munificent/magpie-csharp</p>
+<p>&lt;div class=&quot;update&quot;&gt; &lt;p&gt;&lt;em&gt;Update 2011/08/16:&lt;/em&gt; Magpie lives in &lt;a href=&quot;https://github.com/munificent/magpie-csharp&quot;&gt;GitHub&lt;/a&gt; now.&lt;/p&gt; &lt;/div&gt;</p>
+<p>I hate &quot;general announcement&quot; blog posts, especially on my blog because it&#x27;s not like people read this just to find out what <em>I&#x27;m</em> doing, so to try to make this at least a little bit interesting, here&#x27;s some stupid Magpie tricks: things that are doable or easy in Magpie that can be a pain in other languages.</p>
+<h2>Constructor function references</h2>
+<p>In Magpie, almost everything is a function, including constructors. Since it doesn&#x27;t have an explicit <code>new</code> keyword, you can pass around a reference to a constructor like you can any other function.</p>
+<pre class="magpie1"><code>// Define a type.
+struct Point
+    X Int
+    Y Int
+end
+
+Main (-&gt;)
+    // Pass the constructor to a function.
+    TakeRef fn Point (Int, Int)
+end
+
+TakeRef (func fn (Int, Int -&gt; Point))
+    // Call the reference.
+    def point &lt;- func (1, 2)
+
+    Print (point.X.String + &quot;, &quot; + point.Y.String)
+end</code></pre>
+<p>Try <em>that</em> C# and C++!</p>
+<h2>Tupled arguments</h2>
+<p>Functions in Magpie always take a single argument. To pass in multiple arguments, you use a tuple. Syntactically, it looks the same as other languages, but does have an interesting side-effect: you can treat the entire batch of arguments as a single value to be played with:</p>
+<pre class="magpie1"><code>// Define a function that takes three arguments.
+Sum (a Int, b Int, c Int -&gt; Int) a + b + c
+
+Main (-&gt;)
+    // Calling it looks pretty normal...
+    def a &lt;- Sum (1, 2, 3)
+
+    // But you can also do this:
+    def tuple &lt;- (1, 2, 3)
+    def b &lt;- Sum tuple
+    Print b.String
+
+    // Or this:
+    def tuple2 &lt;- GetArgs
+    def c &lt;- Sum tuple2
+    Print c.String
+end
+
+// This function returns a tuple.
+GetArgs (-&gt; (Int, Int, Int)) (4, 5, 6)</code></pre>
+<h2>Is that it?</h2>
+<p>I know, I know. Not exactly mind-blowing. There&#x27;s still lots of work for me to do on the language, but it&#x27;s getting there. At the very least, there&#x27;s a pretty readable hand-coded lexer and LL parser in there. </p>

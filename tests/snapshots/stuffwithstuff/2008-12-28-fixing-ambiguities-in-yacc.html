@@ -1,0 +1,170 @@
+<p>For kicks, I&#x27;ve been writing a little toy programming language using [F#][</p>
+<p>], [lex][</p>
+<p>] and [yacc][</p>
+<p>] (fslex and fsyacc, specifically, although everything here should apply to [any lex and yacc][</p>
+<p>]). If you&#x27;ve tried doing this, inevitably you&#x27;ve run into the issue of ambiguity in your grammar. This means there&#x27;s more than one equally valid way to parse an input string, so the parser can&#x27;t decide, gets very upset, and starts writing on its [LiveJournal][</p>
+<p>] about how unfair life is.</p>
+<p>[f#]: https://www.apress.com/gp/book/9781484207413 [lex</p>
+<p>]: http://en.wikipedia.org/wiki/Lex_programming_tool [yacc]: http://en.wikipedia.org/wiki/Yacc [any lex and yacc</p>
+<p>]: http://dinosaur.compilertools.net/ [livejournal]: http://snarkmarket.com/blog/snarkives/briefly_noted/the_poetry_of_livejournal/</p>
+<p>The two areas where you&#x27;ll run into problems are <em>associativity</em> and <em>precedence</em>. This is so common that yacc has [support built-in][prec</p>
+<p>] to address them, but unfortunately <code>%left</code> and <code>%right</code> don&#x27;t always work as well as you&#x27;d like. Instead, I&#x27;ll show you some techniques I figured out from the [1985 C ANSI reference grammar][c</p>
+<p>] for how to resolve these using just basic grammar rules. First, definitions:</p>
+<p>[prec]: http://www.cs.man.ac.uk/~pjj/cs2121/ho/node5.html#SECTION00054000000000000000 [c</p>
+<p>]: http://www.lysator.liu.se/c/ANSI-C-grammar-y.html</p>
+<h2>Associativity</h2>
+<p>Associativity means that, given a run of the same operator, should it go left to right, or right to left? For example:</p>
+<pre class="c"><code>1 + 2 + 3</code></pre>
+<p>One of those additions needs to be performed first. Should it be <code>(1 + 2) + 3</code> or <code>1 + (2 + 3)</code>? Left-associative operators pick the first, and right-associative ones take the other. Most operators you see in math are left-associative. Also, most produce the same result in either order. Subtraction, like <code>3 - 2 - 1</code>, is one example where associativity <em>does</em> matter.</p>
+<h2>Precedence (AKA order of operations)</h2>
+<p>Precedence is the other bugaboo. The question here is, given a few different operations, which are performed first? For example:</p>
+<pre class="c"><code>1 + 2 * 3</code></pre>
+<p>Should that be <code>(1 + 2) * 3</code>, or <code>1 + (2 * 3)</code>? yacc doesn&#x27;t know your [Dear Aunt Sally][sally</p>
+<p>], so you have to tell it. I&#x27;m using arithmetic expressions as examples here, but this applies to <em>all</em> facets of expressions and statements: Given <code>result = foo.x + 2</code> should we do the assignment (<code>=</code>), field access (<code>.</code>), or addition (<code>+</code>) first?</p>
+<p>[sally]: http://everything2.com/e2node/Please%2520Excuse%2520My%2520Dear%2520Aunt%2520Sally</p>
+<h2>A toy language</h2>
+<p>For our exercise, we&#x27;ll consider a little toy language. It supports integer literals, functions that take and return a single integer, and binary operators. Functions are any normal identifier name like <code>foo</code> or <code>rockMeAmadeus</code>. Operators can be any punctuation character like <code>+</code> or <code>&amp;</code>. Statements end with a semicolon (<code>;</code>), and parentheses (<code>( )</code>) can be used for grouping.</p>
+<p>Function application is higher precedence than operators, such that <code>foo 1 + 2</code> should apply <code>1</code> to <code>foo</code> first and then add <code>2</code> to the result.</p>
+<p>Binary operators are left-associative and all have the same precedence. In other words, unlike in arithmetic, <code>+</code> and <code>*</code> have the same order of operations. Here are some examples:</p>
+<pre class="c"><code>123;                // An int.
+foo bar 1;          // Pass 1 to bar, pass the result to foo.
+6 + 2 * 3 / 4;      // Binary operators (result = 6).
+foo 1 + bar 2;      // Mix operators and functions.
+foo (1 + bar 2);    // Parentheses for grouping.</code></pre>
+<p>Pretty simple, but already you can see the trouble spots. In the third example, how does the grammar know to make it left-associative? In the fourth, how does it know to do the function application before the addition?</p>
+<h2>Lexing and parsing (briefly)</h2>
+<p>You and I are both smart enough to [figure out][lex tut</p>
+<p>] how to lex the above. Let&#x27;s assume we&#x27;ve got a working lexer that emits following tokens: <code>INT</code>, <code>FUNCTION</code>, <code>OPERATOR</code>, <code>LPAREN</code>, <code>RPAREN</code>, and <code>SEMI</code>.</p>
+<p>[lex tut]: http://www.google.com/search?hl=en&amp;#038;q=lex%20tutorial</p>
+<p>Likewise, I&#x27;m not going to cover setting up yacc or discuss the [AST][ast</p>
+<p>] emitted by it. Assume the action steps do what you want, know that the entry point for our grammar is <code>start:</code>, and we shall proceed...</p>
+<p>[ast]: http://en.wikipedia.org/wiki/Abstract_syntax_tree</p>
+<h2>From the bottom up</h2>
+<p>We&#x27;re going to build the full grammar for the toy language above with the proper precedence and associativity from the bottom up. We&#x27;ll start with integers:</p>
+<h3>Integers</h3>
+<pre class="text"><code>start:
+    | Expression SEMI               { $1 }
+
+Expression:
+    | Primary                       { $1 }
+
+Primary:
+    | INT                           { Int $1 }</code></pre>
+<p>This is a little more complicated than necessary, but it&#x27;ll make sense later. Our entrypoint says we&#x27;re parsing a single expression terminated with a semicolon. An expression in turn can only be one thing (right now): a &quot;primary expression&quot;. A primary expression is just an integer. Magical. We can now parse <code>123</code>. Break open the champagne bottles.</p>
+<h3>Operators</h3>
+<p>Let&#x27;s throw operators in:</p>
+<pre class="text"><code>Expression:
+    | Primary                        { $1 }
+    | Expression OPERATOR Expression { Operator ($1, $2, $3) }</code></pre>
+<p>Try compiling that and watch a yacc barf on your screen. yacc can handle recursive rules pretty well, but that operator one is a doozy. Not only is it recursive, but it provides <em>two</em> paths to recurse and no guidance for which one to choose.</p>
+<p>Congratulations, you just hit the associativity problem. The issue is, given the text <code>1 + 2 * 3</code> yacc looks at that rule and says: &quot;Well <code>1 + 2</code> is an expression and <code>*</code> is an operator, and <code>3</code> is an expression, so I could parse that way. But wait, <code>1</code> is also an expression, and <code>+</code> is an operator, and `2 * 3` is an expression, so the rule works that way too. [Oh noes!][no</p>
+<p>]&quot;</p>
+<p>[no]: http://lolabrigada.files.wordpress.com/2008/03/oh-noes-pillow-hat-too-heavy.jpg</p>
+<h3>Specifying associativity</h3>
+<p>We fix it by simply specifically ruling out one of those cases. If one side of an operator can <em>only</em> be an integer, then half of that ambiguity disappears. Behold:</p>
+<pre class="text"><code>start:
+    | Expression SEMI               { $1 }
+
+Expression:
+    | Primary                       { $1 }
+    | Expression OPERATOR Primary   { Operator ($1, $2, $3) }
+
+Primary:
+    | INT                           { Int $1 }</code></pre>
+<p>Note that the <code>Operator</code> rule now has <code>Primary</code> on the right of the operator now. What we&#x27;ve done is allowed the <code>Operator</code> rule to recurse only on <em>one</em> side and force it to cascade down a level on the other. By putting the same-level recursive <code>Expression</code> to the <em>left</em> of the <code>OPERATOR</code>, we&#x27;ve chosen to make operators <em>left</em>-associative. Switch it around to `Primary OPERATOR Expression` and you&#x27;ve got a right-associative rule. So that&#x27;s how to solve half our ambiguity problems.</p>
+<h3>Functions</h3>
+<p>Let&#x27;s throw functions in. Consider just this:</p>
+<pre class="text"><code>Expression:
+    | Primary                       { $1 }
+    | FUNCTION Expression           { Function ($1, $2) }</code></pre>
+<p>Now an expression can either be an integer, or a function applied to an expression. Making the function rule recursive lets us handle not only <code>foo 123</code> but chained function calls like <code>foo bar 123</code>.</p>
+<p>Pretty good. Now mix it in with our operator rule:</p>
+<pre class="text"><code>start:
+    | Expression SEMI               { $1 }
+
+Expression:
+    | Primary                       { $1 }
+    | FUNCTION Expression           { Function ($1, $2) }
+    | Expression OPERATOR Primary   { Operator ($1, $2, $3) }
+
+Primary:
+    | INT                           { Int $1 }</code></pre>
+<p>yacc vomit covers your screen. Given <code>foo 1 + 2</code>, yacc says, &quot;Well <code>foo</code> is a function and <code>1 + 2</code> is an expression so I can pick the function rule. But `foo 1<code> is an expression and </code>2` is a primary, so I could pick the operator rule instead. I&#x27;m feeling queasy!&quot; Actually, yacc, like a good party guest, will clean up their own vomit and let you proceed with this conflict by trying to guess at your preferred precedence, but it&#x27;s unwise to rely on that.</p>
+<p>What we need is to tell yacc to always do function application first. `foo 1 + 2<code> should always be read as </code>(foo 1) + 2`.</p>
+<h3>Specifying precedence</h3>
+<p>We can fix this similarly to how we handled associativity. Remember how I described the rules as a cascading series from complex to simple? Another way to look at those is as <em>explicit order of operations</em>, from last to first. Let&#x27;s split out the rules a bit:</p>
+<pre class="text"><code>start:
+    | Expression SEMI               { $1 }
+
+Expression:
+    | Primary                       { $1 }
+    | Function                      { $1 }
+    | Operator                      { $1 }
+
+Operator:
+    | Expression OPERATOR Function  { Operator ($1, $2, $3) }
+
+Function:
+    | FUNCTION Expression           { Function ($1, $2) }
+
+Primary:
+    | INT                           { Int $1 }</code></pre>
+<p>That doesn&#x27;t actually fix anything for us, yet. The problem is that the <code>Expression</code>, <code>Operator</code>, and <code>Function</code> rules all recursively point to each other. Our neat cascade is trying to flow uphill. The trick, and the fix for our issue, is to simply <em>not allow any rule to reference a rule above it</em>:</p>
+<pre class="text"><code>start:
+    | Expression SEMI               { $1 }
+
+Expression:
+    | Operator                      { $1 }
+    | Function                      { $1 }
+    | Primary                       { $1 }
+
+Operator:
+    | Operator OPERATOR Function    { Operator ($1, $2, $3) }
+
+Function:
+    | FUNCTION Function             { Function ($1, $2) }
+
+Primary:
+    | INT                           { Int $1 }</code></pre>
+<p>This is better, but we just broke a bunch of stuff. Since nothing bounces back up to <code>Expression</code>, there isn&#x27;t a way to actually terminate anything with an integer anymore. We can no longer parse <code>foo 1</code> or <code>1 + 2</code>. The problem is that when, for example, the operator rule references <code>Function</code>, what it means is &quot;you can insert any function expression here&quot;, but we <em>want</em> it to mean &quot;you can insert any function <em>or higher precedence</em> expression here&quot;. For our purposes, that would mean a primary expression: an integer.</p>
+<p>We can fix that by making each precendence level have a fall-through case to the next highest level. Thus, anywhere we can use a function, we can also use a primary, and anywhere we can use an operator, we can also use a function. Like so:</p>
+<pre class="text"><code>start:
+    | Expression SEMI               { $1 }
+
+Expression:
+    | Operator                      { $1 }
+
+Operator:
+    | Operator OPERATOR Function    { Operator ($1, $2, $3) }
+    | Function                      { $1 }
+
+Function:
+    | FUNCTION Function             { Function ($1, $2) }
+    | Primary                       { $1 }
+
+Primary:
+    | INT                           { Int $1 }</code></pre>
+<p>Congratulations, we&#x27;ve fixed our precedence problem. Our parser will now correctly parse <code>foo 1 / bar 2 + 3</code> as <code>((foo 1) / (bar 2)) + 3</code>. As a nice side effect, the order of operations (from last to first) in our language is easily visible simply by scanning through the grammar. This is trivial in this one, but a language like C has something like 15 different precedence levels.</p>
+<h2>(): &quot;Hey, you forgot us!&quot;</h2>
+<p>One last thing: with any expression system, users will also want to be able to use parentheses to override the default order of operations. This is fixed by adding a simple rule at the very end:</p>
+<pre class="text"><code>start:
+    | Expression SEMI               { $1 }
+
+Expression:
+    | Operator                      { $1 }
+
+Operator:
+    | Operator OPERATOR Function    { Operator ($1, $2, $3) }
+    | Function                      { $1 }
+
+Function:
+    | FUNCTION Function             { Function ($1, $2) }
+    | Primary                       { $1 }
+
+Primary:
+    | INT                           { Int $1 }
+    | LPAREN Expression RPAREN      { $2 }</code></pre>
+<p>All the way at the highest level of precedence, you can now use <code>()</code> to start the cascade back over at the lowest predecence level (<code>Expression</code>). This means that from the outside, a pair of parentheses have the highest precedence, but are able to contain an expression of <em>any</em> precedence, thus letting the cascade loop back on itself predictably.</p>
+<p>Interestingly, you&#x27;ll note that nothing specific needs to be done in the action step for parentheses. Its effect is handled totally by the parser and simply affects the shape of the AST generated.</p>
+<h2>Conclusion</h2>
+<p>I&#x27;m still far from an expert when it comes to yacc. The reason I had to infer this from an old C reference is because I don&#x27;t have any <a href="http://books.google.com/books?id=YrzpxNYegEkC&#038;dq=lex+and+yacc&#038;printsec=frontcover&#038;source=bn&#038;hl=en&#038;sa=X&#038;oi=book_result&#038;resnum=4&#038;ct=result">books</a> on the subject, so there may be entirely inane things going on here I&#x27;m not aware of, but I <em>think</em> this is a sound technique. For your own grammars, it&#x27;s still worth considering using the precedence and associativity built into yacc, but if that doesn&#x27;t work for you, this should be a viable alternative. </p>

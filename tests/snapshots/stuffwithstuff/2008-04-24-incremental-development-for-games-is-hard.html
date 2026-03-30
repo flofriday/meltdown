@@ -1,0 +1,58 @@
+<p>For those who don&#x27;t know, the game industry (or at least my chunk of it) is generally about 10 years behind the rest of the software world. We&#x27;re still leery of crazy ivory tower concepts like &quot;memory management&quot;, &quot;testing&quot;, and &quot;going home at 5:00 PM&quot;. Where your hip Web 2.0 company is all aflutter about [DSLs][</p>
+<p>], [duck typing][</p>
+<p>], and [continuations][</p>
+<p>], my company is a little more:</p>
+<p>[dsls]: https://en.wikipedia.org/wiki/Domain-specific_language [duck typing</p>
+<p>]: https://en.wikipedia.org/wiki/Duck_typing [continuations]: https://github.com/seasidest/seaside</p>
+<blockquote> <strong>Brown:</strong> I have just received a telegraph from Jenkins discussing something</blockquote><blockquote> he calls, &quot;[the Ess Tee Ell][stl</blockquote><p>]&quot;. &gt; &gt; <strong>Watson:</strong> Desist your crazy Moon Man talk or I shall be forced to give you a &gt; drubbing!</p>
+<p>[stl]: https://en.wikipedia.org/wiki/Standard_Template_Library</p>
+<p>It&#x27;s not that we aren&#x27;t trying. We&#x27;re just a little more [East Berlin][east berlin</p>
+<p>] circa 1950 than the rest of the software world. One concept that <em>has</em> [crossed][agile</p>
+<p>] our Iron Curtain recently is this thing called &quot;[Agile Development][manifesto</p>
+<p>]&quot;. I can&#x27;t say we really know what it means, but it is very interesting to us.</p>
+<p>[east berlin]: http://www.galenfrysinger.com/east_berlin.htm [agile</p>
+<p>]: http://www.agilegamedevelopment.com/ [manifesto]: http://agilemanifesto.org/</p>
+<h2>Games are hard</h2>
+<p>You see, developing a new game is really hard. On top of the technical reasons (pushing the graphics hardware, strict quality control) and the business ones (cutthroat competition, [difficult profitability][profit</p>
+<p>]), there&#x27;s this other little thing called &quot;fun&quot;.</p>
+<p>[profit]: http://news.bbc.co.uk/2/hi/technology/6397527.stm</p>
+<p>If you&#x27;re making [business software][ms</p>
+<p>] and it&#x27;s a [pain to use][office</p>
+<p>], you can still be totally successful because people need to use your stuff to get their job done, like it or not. And your software can be [totally unoriginal][apple</p>
+<p>] because people don&#x27;t want to have to learn new things. Unoriginality is actually [a bonus][jakob</p>
+<p>].</p>
+<p>[ms]: http://www.microsoft.com/ [office</p>
+<p>]: http://office.microsoft.com/ [apple]: http://en.wikipedia.org/wiki/Apple_v._Microsoft [jakob</p>
+<p>]: https://www.nngroup.com/videos/jakobs-law-internet-ux/#:~:text=Summary%3A%20Users%20spend%20most%20of,for%20which%20users%20are%20accustomed.</p>
+<p>Over in Magical Game Land, though, we aren&#x27;t so lucky. We&#x27;re trying to get people to shell out hard-earned cash for something that, by definition, they <em>don&#x27;t need</em>. So we have to make sure it&#x27;s more fun to play than whatever else they could be doing. We have to make sure we&#x27;re offering them a <em>new</em> experience, otherwise they&#x27;ll just play an older game. At the same time, our new game has to be easy enough to learn that it&#x27;s enjoyable within the first 30 seconds.</p>
+<p>On top of this, budgets and player expectations continue to rise, so the chance and cost of failure keeps going up. Because of this, if a game&#x27;s going to suck, we need to know as soon as possible so we can correct course or [pull the ejection seat lever][cancel</p>
+<p>].</p>
+<p>[cancel]: https://en.wikipedia.org/wiki/Category:Cancelled_video_games</p>
+<h2>Enter agile development</h2>
+<p>Agile development means a lot of things to different people, but the key part I want to talk about is the idea of <strong>building a game incrementally through a series of small changes</strong>. This idea that a month into the cycle you have a <em>fun</em> playable game already and you just build onto that is very appealing because it means we can immediately get feedback on what parts work and what don&#x27;t.</p>
+<p>For a micro example, imagine you&#x27;re building a [chess-like][fairy</p>
+<p>] game. In a typical [waterfall][</p>
+<p>]-like model, you won&#x27;t be able to actually play the game until all the different pieces are designed and implemented. And then you can play the whole thing. Sometime in alpha, after you&#x27;ve burned most of your budget. Better hope the game is fun!</p>
+<p>[fairy]: http://en.wikipedia.org/wiki/Fairy_chess_piece [waterfall</p>
+<p>]: http://en.wikipedia.org/wiki/Waterfall_model</p>
+<p>With a more agile method, you&#x27;d be able to play the game early in the cycle with a couple of pieces, and then gradually add in more pieces throughout. You&#x27;ll be testing some core mechanics early in and can change things if they don&#x27;t work.</p>
+<h2>Uh-oh</h2>
+<p>Even that tiny example hints at the pitfall ahead: games are all about <em>balance</em>. Chess is unplayable with just two kings and some pawns. Without the other pieces, it&#x27;s a fundamentally different game. So now we&#x27;ve gone from &quot;nothing to play&quot; to &quot;playing a totally different game that may or may not reflect the final game&quot;. Ouch.</p>
+<p>This is where games are different than other software. If you&#x27;re making a word processor, adding right-justification doesn&#x27;t somehow &quot;unbalance&quot; left- justification. Features are fairly isolated from each other and don&#x27;t compete. In a game, every feature or capability affects the overall strategy and equilibrium. Building a game incrementally is like trying to build a [hanging mobile][</p>
+<p>] by hanging it up <em>first</em> and then hanging successive pieces onto it.</p>
+<p>[hanging mobile]: https://en.wikipedia.org/wiki/Mobile_(sculpture)</p>
+<h2>Solutions?</h2>
+<p>I suspect this is one of the fundamentally hard parts of designing a new game. That sense of &quot;everything works in harmony&quot; is irreducible to some extent. I&#x27;ll point out a couple of ideas to at least carve at the problem a bit.</p>
+<h3>Separate the core from the peripheral</h3>
+<p>If we&#x27;re designing minimal abstract board games, there aren&#x27;t a lot of &quot;peripheral&quot; features. In computer/video-games it&#x27;s a bit different. Non- interactive set decoration, some UI, extra games modes, etc. all surround the core &quot;mechanics&quot; of the game. So, even if you can&#x27;t do the core mechanics incrementally, you can at least do them in one lump and then tack on the additional stuff afterwards.</p>
+<p>Be careful here, though. Even seemingly trivial things like UI or [VFX][vfx</p>
+<p>] can have a massive impact on the usability of your game.</p>
+<p>[vfx]: http://en.wikipedia.org/wiki/Particle_system</p>
+<h3>Match pairs</h3>
+<p>If you&#x27;re starting with a balanced game and you need to add features while keeping it balanced, one obvious solution is to try to add them in opposing pairs. For symmetric games like chess, this is fairly simple: implement the same piece for both players. For other games, it gets trickier.</p>
+<p>If you&#x27;re adding speed boosts to a driving game, you might be able to match it by also adding slowdown and damage for hitting the walls at the same time. For an RPG, giving the player a new attack may require also adding monsters that resist it.</p>
+<h3>Accept retuning</h3>
+<p>Most games, on top of the feature set itself, have a lot of precise tuning of numbers that happens to make it fun. Those numbers have to be tuned relative to the current feature set. Adding a new feature can essentially detune them. If you give your hero a shotgun, all of the sudden it may be time to double the enemy&#x27;s health. Make the AI smarter and your hero is toast.</p>
+<p>If a fun playable game at all points through the cycle is important, it may be worth accepting that you will need to frequently retune the same values as the feature set changes. To some degree, this is &quot;throwaway&quot; work, but if it gives you a better ability to evaluate your game, it may be worth the effort.</p>
+<h3>Reduce innovation</h3>
+<p>Of course, all of the above assumes you&#x27;re making a game with actually new mechanics. If you&#x27;re making chess on the other hand, it doesn&#x27;t matter if the game sucks with just kings and pawns. You know by the time the rest of the pieces are in it will be cool. So the safest option is just to rely on the established formula of your game&#x27;s genre, and save your innovation for peripheral features. </p>

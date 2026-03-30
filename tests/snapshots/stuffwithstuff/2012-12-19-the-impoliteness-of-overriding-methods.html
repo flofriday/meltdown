@@ -1,0 +1,154 @@
+<p>Over the weekend, I was reading one of the shagadelic papers on [Self][</p>
+<p>], [Parents are Shared Parts of Objects: Inheritance and Encapsulation in SELF][paper</p>
+<p>]. What can I say, I have a weird idea of fun. If you&#x27;re interested in prototypes, or you&#x27;re a Javascripter -- but I repeat myself -- you owe it to yourself to read these papers. They are gems.</p>
+<p>[self]: http://selflanguage.org [paper</p>
+<p>]: http://selflanguage.org/documentation/published/parents-shared-parts.html</p>
+<p>But this post isn&#x27;t about prototypes, it&#x27;s about something the Self folks mention in passing:</p>
+<blockquote> In BETA, virtual functions are invoked from least specific to most specific,</blockquote><blockquote> with the keyword <code>inner</code> being used to invoke the next more specific method.</blockquote><blockquote> This mechanism is a product of the philosophy in BETA that subclasses should</blockquote><blockquote> be behavioral extensions to their superclasses and therefore specialize the</blockquote><blockquote> behavior of their superclasses at well-defined points (i.e. at calls to</blockquote><blockquote> <code>inner</code>).</blockquote><p>It took me a while to tease out what this is saying, but once I did, it was like a dim little light bulb flickered on in my head.</p>
+<h2>What&#x27;s BETA?</h2>
+<p>Before I get into the lightbulb part, a bit of history. [BETA][</p>
+<p>] is a language that came out of the &quot;Scandinavian School&quot; in Denmark, the [same people][</p>
+<p>] that brought you [Simula][</p>
+<p>] and kicked off the object-oriented revolution. Alan Kay may have coined &quot;object-oriented programming&quot;, but it was Simula that gave him the idea. Chances are, the language you should be coding in right now instead of slacking off reading my blog was directly inspired by these guys.</p>
+<p>[beta]: http://daimi.au.dk/~beta [same people</p>
+<p>]: http://en.wikipedia.org/wiki/Kristen_Nygaard [simula]: http://en.wikipedia.org/wiki/Simula</p>
+<p>So after Simula, they went off and made BETA. I think this is more or less equivalent to &quot;famous rock band goes into hiding for ten years and emerges with avant garde free jazz album&quot;. BETA was used as a teaching language, I think, and there were some papers about it, but I don&#x27;t know if many people seriously used it in anger.</p>
+<p>(Trivia time! Some of the guys who made [V8][</p>
+<p>], the famously-fast JavaScript engine in Chrome <em>did</em> use BETA. &quot;V8&quot; got its name because it&#x27;s the eighth virtual machine that Lars Bak created. His first VM? A BETA one.)</p>
+<p>[v8]: https://github.com/v8/v8</p>
+<p>Part of the reason BETA didn&#x27;t flourish may have to do with terminology. Instead of <em>classes</em> and <em>methods</em>, BETA has <em>patterns</em> which subsume both, somehow, and aren&#x27;t related to other uses of the term in other languages. I wrote that sentence, and I don&#x27;t even know what the hell that means.</p>
+<p>The <a href="http://daimi.au.dk/~beta/Books/index.html#betabook_download">BETA book</a> is a bit... dense. Or maybe it&#x27;s just that the syntax is so <em>weird</em>:</p>
+<pre class="text"><code>Account:
+  (# balance: @integer;
+    Deposit:
+      (# amount: @integer
+      enter amount
+      do balance+amount-&gt;balance
+      exit balance
+      #);
+
+    Withdraw:
+      (# amount: @integer
+      enter amount
+      do balance-amount-&gt;balance
+      exit balance
+      #);
+  #)</code></pre>
+<p>I pride myself on being able to grok syntax on a pretty wide variety of languages but I&#x27;m not even sure what&#x27;s a <em>comment</em> there. I <em>think</em> if you translated that to JavaScript, it would be something like:</p>
+<pre class="javascript"><code>var account = {
+  balance: undefined,
+
+  deposit: function(amount) {
+    return this.balance += amount;
+  },
+
+  withdraw: function(amount) {
+    return this.balance -= amount;
+  }
+};</code></pre>
+<p>Like avant garde jazz, this may be genius, but it&#x27;s so out there and unapproachable, it&#x27;s hard to tell. Fortunately, the Self guys have deciphered some of the mystery and left that little nugget in their paper.</p>
+<h2>Overriding and <code>super()</code></h2>
+<p>Let&#x27;s cover one last bit of context before I get to the point. If you&#x27;re using any object-oriented language, you&#x27;re hopefully familiar with overriding methods. Details vary between languages, but the two main points are:</p>
+<p>1.  A subclass can <em>override</em> a method in its superclass. When you invoke the     method on an instance of the subclass, the derived method gets called     <em>first</em>.</p>
+<p>2.  In the body of the overriding method, you can invoke the base class method     directly in order to chain the two methods together. In Java, you do so by     calling <code>super.someMethod()</code>. In C# it&#x27;s <code>base.someMethod()</code>. In CLOS, you     use <code>call-next-method</code>. You get the idea.</p>
+<p>I&#x27;m using class terminology here, but all of the above applies equally well to prototypal languages too, with a couple of names changed.</p>
+<p>Here&#x27;s an example:</p>
+<pre class="java"><code>class Account {
+  int balance = 0;
+  int deposit(int amount) {
+    return balance += amount;
+  }
+}
+
+class CrappyBankAccount extends Account {
+  int deposit(int amount) {
+    // Service charge, sucker!
+    CrappyBank.mainAccount.deposit(2);
+    super.deposit(amount - 2);
+  }
+}</code></pre>
+<p>So now, if you do something like this:</p>
+<pre class="java"><code>Account account = new CrappyBankAccount();
+account.deposit(23);</code></pre>
+<p>First, it invokes <code>CrappyBankAccount#deposit()</code>. Then, when that calls <code>super.deposit()</code>, it chains to the base <code>Account#deposit()</code> method.</p>
+<h2>Who&#x27;s in charge here?</h2>
+<p>What this means is that the <em>subclass</em> is in control of the dispatch chain. When you override a method in Java, you get to decide if you do stuff before calling <code>super</code> or after. You can change the arguments you pass to it, or even skip calling it entirely.</p>
+<p>This is great for flexibility, but as an API designer, that can be frustrating. When I&#x27;m making a class that&#x27;s designed to be subclassed, I often have constraints that I want my class to ensure. For example:</p>
+<pre class="java"><code>class GameObject {
+  float x, y;
+
+  void render(Renderer renderer) {
+    renderer.setTransform(x, y);
+  }
+}
+
+class ScaryMonster extends GameObject {
+  void render(Renderer renderer) {
+    super.render(renderer);
+    renderer.drawImage(Images.SCARY_MONSTER);
+  }
+}</code></pre>
+<p>Here we&#x27;re making a game with a base class for a character in the world. It provides a default <code>render()</code> method that tells the renderer where to render. The subclass overrides it and draws the specific image that&#x27;s appropriate for that character.</p>
+<p>There&#x27;s an implied requirement here: if you override <code>render()</code> in a subclass, you <em>must</em> call <code>super.render()</code> <em>before</em> you do any drawing. If you don&#x27;t, the transform won&#x27;t be set and it&#x27;ll draw wrong.</p>
+<p>These hidden requirements rub me the wrong way. If you&#x27;re implementing a subclass of <code>GameObject</code>, how are you supposed to know that you need to do that? You can document it, but it would be better if the base class itself made sure you did the right thing.</p>
+<h2><code>render()</code> and <code>onRender()</code></h2>
+<p>To solve this, what I (and lots of other people) do is split these into two methods, like so:</p>
+<pre class="java"><code>class GameObject {
+  float x, y;
+
+  void render(Renderer renderer) {
+    renderer.setTransform(x, y);
+    onRender(renderer);
+  }
+
+  protected abstract void onRender();
+}
+
+class ScaryMonster extends GameObject {
+  protected void onRender(Renderer renderer) {
+    renderer.drawImage(Images.SCARY_MONSTER);
+  }
+}</code></pre>
+<p>Our public <code>render()</code> method is now designed to <em>not</em> be overridden. (In C++ or C# you&#x27;d make it non-virtual.) It does the setup it needs and calls the protected abstract <code>onRender()</code> method. That method <em>is</em> intended to be overridden, and by making it protected and abstract, it&#x27;s clear you <em>must</em> override it. Marking it abstract also makes it clear that you don&#x27;t need to call <code>super()</code>.</p>
+<p>This lets the base class stay in control of the dispatch process. It can do setup before and after the subclass&#x27;s &quot;overridden&quot; method gets called. The dispatch order is reversed now. When you call <code>render()</code>, you hit the superclass <em>first</em> and then it calls <code>onRender()</code> in the subclass.</p>
+<p>This is almost always how I design classes that I intend to be subclassed. It&#x27;s rare that I override methods in my code that aren&#x27;t abstract, and I&#x27;ve been on teams with style guides that enforced this pattern.</p>
+<h2>Back to BETA</h2>
+<p>Of course, the problem with this is that it <em>is</em> a pattern. You have to make a pair of methods, and every time you have another level of subclassing, you need a new name. (If there was a subclass of <code>ScaryMonster</code> that wanted to override <code>onRender()</code> then <code>ScaryMonster</code> would have to add a <code>onOnRender()</code>.) This brings us back to BETA.</p>
+<p>Overriding methods in BETA works exactly like this pattern, but baked right into the language. Instead of calling <code>super()</code> in the <em>derived</em> class, you call <code>inner()</code> in the <em>base</em> class. That tells it to chain <em>down</em> to the subclass at that point.</p>
+<p>When you invoke an overridden method, dispatch starts at the <em>base</em> class (just like we want in the <code>GameObject</code> example) and then walks down to the subclasses at the superclass&#x27;s whim. In other words, our example with BETA-style overriding would look like:</p>
+<pre class="java"><code>class GameObject {
+  float x, y;
+
+  void render(Renderer renderer) {
+    renderer.setTransform(x, y);
+    inner(renderer);
+  }
+}
+
+class ScaryMonster extends GameObject {
+  void render(Renderer renderer) {
+    renderer.drawImage(Images.SCARY_MONSTER);
+  }
+}</code></pre>
+<p>If you chain more than two levels of subclasses, BETA scales better because you don&#x27;t need to keep coming up with new names. It has some other neat attributes too.</p>
+<pre class="java"><code>class GameObject {
+  float x, y;
+
+  void render(Renderer renderer) {
+    renderer.setTransform(x, y);
+    inner(renderer);
+    renderer.restoreState();
+  }
+}
+
+class ScaryMonster extends GameObject {
+  void render(Renderer renderer) {
+    renderer.drawImage(Images.SCARY_MONSTER);
+  }
+}</code></pre>
+<p>Here, we&#x27;ve added a call to <code>restoreState()</code> after the call to <code>inner()</code>. By giving control of the dispatch to the base class, it can execute code both before <em>and</em> after the derived class code. <code>super()</code> doesn&#x27;t let you do that. (Though <code>super()</code> does let you handle the opposite case: you can put code before and after the <em>base</em> class code in the derived method that calls <code>super()</code>.)</p>
+<p>It also gives you a convenient way to control which methods are virtual and which aren&#x27;t. If a method doesn&#x27;t call <code>inner()</code> it implicitly can&#x27;t be overridden since it cedes no control to a subclass.</p>
+<p>What this means is that base classes have explicit control over how they can be extended. Outside of programming, &quot;override&quot; has negative connotations: it means you&#x27;re hijacking something without its consent and indeed overriding does kind of work like that in most languages.</p>
+<p>In the early days of class-based OOP, people thought any old class could be spontaneously subclassed. You could just override some stuff and it would all magically work out. What we&#x27;ve realized over time is that the API you expose to subclasses is another boundary layer that needs to be carefully designed. Ad-hoc subclassing rarely works and classes need to be carefully designed up front in order to be subclassed.</p>
+<p>BETA was designed around that model. With typical Scandinavian politeness, you don&#x27;t <em>override</em> your base class, you politely request permission to extend it. I think right now, the style of a lot of object-oriented code today fits that model better.</p>
+<p>Most languages chose a different path than BETA, but this makes me wonder if Kristen and company had it right all along. </p>

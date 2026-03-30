@@ -1,0 +1,218 @@
+<p>You know how when you stare at a hot stove you feel this weird compulsion to put your hand on it? The longer you stare, the stronger the pull, even though you know you&#x27;ll just burn the crap out of yourself. I got a similar compulsion a couple of days ago: <em>I think I can implement multiple inheritance in JavaScript.</em></p>
+<p>I put my hand on the metaphorical burner. It turns out that you <em>can</em>, in Firefox 4 Beta, at least. Never one to shy away from a good hack, I figured I&#x27;d break it down so you can see how it works. (The whole enchilada is [here][code</p>
+<p>].) As a nice bonus, you&#x27;ll get exposed to a potentially really cool feature coming down the pipe in JavaScript, and maybe even change the way you think about multiple inheritance.</p>
+<p>[code]: https://github.com/munificent/multipleinheritance.js</p>
+<h2>What&#x27;s the problem?</h2>
+<p>Before I go into how I made this work, let me explain why I was even thinking about this. As is often the case, frustration was the mother of this invention. My problem was something like this:</p>
+<p>Let&#x27;s say you have a [widget library][</p>
+<p>], a hierarchy of widget classes that you can inherit from to build your own controls. Like all good 21st century class libraries, it strictly uses single inheritance, because multiple inheritance is the devil. Here&#x27;s a piece of that hierarchy (in full ASCII art glory):</p>
+<p>[widget library]: https://developers.google.com/closure/library</p>
+<pre class="asciiart"><code>┌────────┐
+       │ Widget │
+       └────┬───┘
+            │
+     ┌──────┴──────┐
+┌────┴─────┐ ┌─────┴─────┐
+│ Hideable │ │ Container │
+└──────────┘ └───────────┘</code></pre>
+<p>Widget is the root class that all widgets eventually inherit from. It has the core bits than any widget will need, maybe a name, etc. Hideable adds <code>show()</code> and <code>hide()</code> methods for widgets that should be able to toggle their visibility. Container is for parent widgets that can contain other child widgets. It defines <code>addChild()</code>, <code>listChildren()</code>, etc.</p>
+<p>Now I come along to build my little widget. Mine is called DropDownMenu. As you can guess, it has a collection of child widgets (the menu items). And it needs to be shown and hidden (since it&#x27;s a drop-down). You can see the problem. I can&#x27;t inherit from both Hideable and Container.</p>
+<p>One fix is to reorganize the base classes like this:</p>
+<pre class="asciiart"><code>┌────────┐
+ │ Widget │
+ └────┬───┘
+┌─────┴─────┐
+│ Container │
+└─────┬─────┘
+┌─────┴────┐
+│ Hideable │
+└──────────┘</code></pre>
+<p>Now I just inherit from Hideable and I&#x27;m good. But then tomorrow I need to make a new Widget: Tooltip. It can be hidden and shown, but it doesn&#x27;t need any children. It will have to inherit from Hideable, but that implicitly rolls in all this Container stuff it doesn&#x27;t want, wasting memory.</p>
+<p>Worse, it makes it more complicated to understand. Someone coming along later may look at my Tooltip class and think it needs stuff from Container and spend time trying to figure out what and why. Changes to Container have the potential to break Tooltip, even though it&#x27;s getting no benefit from it. Lame!</p>
+<p>The fix for this is to rearrange things again. If some things need Hideable but not Container, it should be above it in the hierarchy, like so:</p>
+<pre class="asciiart"><code>┌────────┐
+ │ Widget │
+ └────┬───┘
+┌─────┴────┐
+│ Hideable │
+└─────┬────┘
+┌─────┴─────┐
+│ Container │
+└───────────┘</code></pre>
+<p>Fine and dandy. The day after tomorrow comes and now I&#x27;m making a new widget again: ListBox. It doesn&#x27;t hide, but it does have children. I&#x27;m right back where I started. There is no solution for this:</p>
+<p><strong>Given single inheritance, there is <em>no</em> possible class hierarchy that lets you combine an arbitrary combination of classes.</strong></p>
+<p>I spent a lot of time trying to figure out the &quot;right&quot; class for me to inherit from for my widget and not knowing why I was so frustrated before the above finally clicked in my head. It isn&#x27;t me that&#x27;s wrong. It isn&#x27;t the class hierarchy of the library I&#x27;m using. It&#x27;s the assumption that single inheritance is adequate.</p>
+<h2>Prior art</h2>
+<p>Before I run off to my text editor, what about other JS class systems? I&#x27;m no expert on JavaScript libraries, but the ones I&#x27;ve seen that fake classes and inheritance do so by manipulating the prototype chain, and almost all of them stay within the limitation that imposes: single inheritance. That&#x27;s an excellent choice in terms of simplicity and performance, but not what I&#x27;m going for.</p>
+<p>Tom Van Cutsem&#x27;s [Traits.js][</p>
+<p>] is a notable counter-example. It allows multiple traits to be composed. I believe it does so by flattening out the traits at composition time. If you compose two traits A and B together to form a new one, C, then add a new member to A afterwards, C won&#x27;t have it. That&#x27;s better, but still not what I wanted.</p>
+<p>[traits.js]: https://traitsjs.github.io/traits.js-website/</p>
+<p>I wanted to do full late-bound multiple inheritance. One of the swell things about JavaScript is that you can extend existing prototypes. I wanted that to work even with multiple inheritance. If I add a method to an existing base class, every class that inherits from it should get it, even if they were defined <em>before</em> I added my new method.</p>
+<h2>The prototypal prototype language</h2>
+<p>Given my goals, it still isn&#x27;t clear what <em>kind</em> of multiple inheritance system I want. Should it work [like C++][cpp</p>
+<p>]? Like [mixins in Ruby][ruby</p>
+<p>]? [Traits in Scala][scala</p>
+<p>]? Of course, if you think about it, there&#x27;s really only one answer...</p>
+<p>[cpp]: http://www.parashift.com/c++-faq-lite/basics-of-inheritance.html [ruby</p>
+<p>]: http://ruby-doc.com/docs/ProgrammingRuby/html/tut_modules.html [scala]: https://docs.scala-lang.org/tour/traits.html</p>
+<p>The Grandaddy of prototype-based languages, the one that directly inspired Eich to create JavaScript, and (I think) the language that first coined the term &quot;trait&quot; is [Self][</p>
+<p>]. Self has a way of handling multiple inheritance that -- like many things in the language -- is both surprisingly simple and surprisingly powerful.</p>
+<p>[self]: http://en.wikipedia.org/wiki/Self_(programming_language)</p>
+<p>It works like this: Every object has a collection of properties, just like JavaScript. If the name of a property ends in an asterisk (<code>*</code>), it&#x27;s considered a &quot;parent property&quot;. When we look up a property on an object, the process is just:</p>
+<p>1.  If the object has the property itself, return it.</p>
+<p>2.  Otherwise, try looking it up on the parent properties. Go through them in     alphabetical order, and stop as soon as we find the property.</p>
+<p>When we check a parent for a property, it may in turn look at <em>its</em> parents, so property lookup is a depth-first search through the parent property graph.</p>
+<p>This is almost trivially simple, but a ton of awesome stuff falls out of it like magic:</p>
+<h3>Single inheritance</h3>
+<p>Single inheritance is easy of course: just make an object that only has one parent property. JavaScript is basically a degenerate case of Self dispatch where the rule for naming a parent property is &quot;must be <code>__proto__</code>&quot;.</p>
+<h3>Multiple inheritance</h3>
+<p>And, of course, multiple inheritance is easy. Just have more than one parent property. Since objects are completely open bags of properties, you can tack on as many as you want.</p>
+<h3>Dynamic inheritance</h3>
+<p>Here&#x27;s where it starts to get interesting. When we&#x27;re walking the parents looking for a property, we look at the <em>value</em> stored in that parent property. Like any other property, you can assign a new value to it. That means, <em>at runtime</em>, you can change an object&#x27;s parents. In effect, a live object can spontaneously change its class.</p>
+<p>You know that whole [State design pattern][</p>
+<p>] that takes a pile of code to implement in Java? With this, it&#x27;s just: <code>object.someParent = newState</code>.</p>
+<p>[state design pattern]: http://en.wikipedia.org/wiki/State_pattern</p>
+<h3>Controlled resolution order</h3>
+<p>One of the challenges with multiple inheritance is figuring out what actual method gets called when there&#x27;s a name collision. If MyClass inherits from two other classes that both have <code>foo()</code>, which one do I get when I call <code>myObject.foo()</code>?</p>
+<p>In Self, you can control that easily -- just name the parent properties so that the one you want to take priority comes first alphabetically.</p>
+<h3>Simple constructors</h3>
+<p>Another annoying facet of multiple inheritance is object construction. Each of your base classes may have its own constructor which needs to get called when the derived class is constructed. Languages often have complex special support just for this: constructor initialization lists in C++, <code>super()</code> in Java, <code>base()</code> in C#, definite assignment static analysis to make sure you initialize your members, etc.</p>
+<p>When your &quot;base classes&quot; are just properties on the object, construction becomes simply assigning some properties.</p>
+<h2>Back to our example</h2>
+<p>So, assuming we can magically make this work, how would it look in JavaScript?</p>
+<p>Here&#x27;s my goal. I want to be able to define a couple of widget &quot;base classes&quot; like this vanilla JavaScript:</p>
+<pre class="javascript"><code>function Widget(name) {
+  this.name = name;
+}
+
+Widget.prototype.getName = function() {
+  return this.name;
+}
+
+function Hideable() {}
+
+Hideable.prototype.hide = function() {
+  log(&#x27;hide &#x27; + this.getName());
+}
+
+Hideable.prototype.show = function() {
+  log(&#x27;show &#x27; + this.getName());
+}
+
+function Container() {
+  this.children = [];
+}
+
+Container.prototype.addChild = function(widget) {
+  log(&#x27;addChild &#x27; + widget.getName() + &#x27; to &#x27; + this.getName());
+  this.children.push(widget);
+}
+
+Container.prototype.listChildren = function() {
+  log(&#x27;children for &#x27; + this.getName());
+  for (var i = 0; i &amp;lt; this.children.length; i++) {
+    log(&#x27;- &#x27; + this.children[i].getName());
+  }
+}</code></pre>
+<p>When I create my widget class, I want to inherit from all of those by creating parent properties that contain one of each. Since I can&#x27;t use <code>*</code> in a property name in JavaScript, I&#x27;ll use <code>_p</code>. So my widget&#x27;s constructor should just be:</p>
+<pre class="javascript"><code>var MyWidget = magic(function(name) {
+  this.widget_p    = new Widget(name);
+  this.hider_p     = new Hideable();
+  this.container_p = new Container();
+})</code></pre>
+<p>Aside from that little <code>magic</code> bit there, this looks like any other JavaScript constructor, but when I <em>use</em> this object, it should support all the methods those parent objects provide. In other words, this should work:</p>
+<pre class="javascript"><code>var widget = new MyWidget(&#x27;Abe&#x27;);
+
+// From Widget:
+log(widget.getName());
+
+// From Hideable:
+widget.hide();
+widget.show();
+
+// From Container:
+widget.addChild(new MyWidget(&#x27;Ben&#x27;));
+widget.addChild(new MyWidget(&#x27;Cid&#x27;));
+widget.addChild(new MyWidget(&#x27;Dan&#x27;));
+widget.listChildren();</code></pre>
+<p>Unpossible you say? Read on:</p>
+<h2>Behold the power of proxies</h2>
+<p>One of the planned features for [Harmony][</p>
+<p>], the codename of the next version of ECMAScript is support for [proxies][</p>
+<p>]. A proxy, as its name implies, is an object that stands in for another. If you have a proxy object <code>jamesBrown</code> and you do something with it like <code>jamesBrown.getOnUp()</code> the runtime will delegate that call to a hidden proxy object.</p>
+<p>[harmony]: https://en.wikipedia.org/wiki/ECMAScript#ES2015 [proxies</p>
+<p>]: https://tvcutsem.github.io/proxies_tutorial</p>
+<p>On its own, that could be little more than a level of indirection, but what&#x27;s important is <em>how</em> it delegates. It does so <em>imperatively</em>. If you look up a property on a proxy, JavaScript doesn&#x27;t just automatically look up a property with the same name on the handler object. Instead, it calls a single magic <code>get</code> method on that handler with the name of the property being requested.</p>
+<p>With that indirection, we have full <em>programmatic</em> control over dispatch. We can implement <em>any</em> kind of inheritance scheme we dream up. All we need to do is replace a regular object with a proxy that has a handler that implements our inheritance scheme.</p>
+<p>For Self-style parent properties, a very primitive hacked-together handler is simply:</p>
+<pre class="javascript"><code>function createSelfHandler(obj) {
+  return {
+    get: function(receiver, name) {
+      // Look in the main object.
+      var value = obj[name];
+      if (value !== undefined) return value;
+
+      // Look in the parents.
+      // BUG: Should look in field alphabetical order.
+      for (var field in obj) {
+        if (field.endsWith(&#x27;_p&#x27;)) {
+          value = obj[field][name];
+          if (value !== undefined) return value;
+        }
+      }
+
+      // Not found.
+      return undefined;
+    }
+  };
+}</code></pre>
+<p>Whenever we create an instance of our MyWidget class, we actually want to get an instance of that proxy instead. We do that by proxying the constructor too:</p>
+<pre class="javascript"><code>function magic(ctor) {
+  var callTrap = function(args) {}
+  var constructTrap = function(args) {
+    return Proxy.create(createSelfHandler(
+        new ctor(args)), Object.prototype);
+  };
+  return Proxy.createFunction(ctor, callTrap, constructTrap);
+}</code></pre>
+<p>Ta-da! Now when we do <code>new MyWidget()</code> we get back a proxy object. When we then look up any properties on it, the proxy shunts over to our dispatch function that knows how to handle the parent property shenanigans. Self-style multiple prototypes in the comfort of your very own browser.</p>
+<h2>Is this a good idea?</h2>
+<p>The short answer is &quot;no&quot;, of course. This little hack should never ever enter the world of real code. I just wanted to see if I could get it to work. Proxies are so incredibly powerful that this is just scratching the surface of what you can do with them. (Did I hear you say &quot;Active Record in JavaScript&quot;? Or was that &quot;remote object&quot;?). But this is truly an inglorious hack and I hate to think of what the performance would be with an app built around this.</p>
+<p>The more important question, though, is, &quot;Is multiple inheritance a good idea?&quot; While I was a &quot;single inheritance + interfaces&quot; Kool-Aid drinker for many years, I&#x27;m starting to feel like the answer is &quot;yes&quot;.</p>
+<p>One of the most powerful tools in the programmer&#x27;s toolbox is <em>composition</em> -- making new things by combining existing parts together. Being able to compose out of <em>multiple</em> parts gives us the ability to create <code>2^n</code> different combinations from just <code>n</code> unique parts. We shouldn&#x27;t give that power up without good reason.</p>
+<h2>But multiple inheritance killed my dog!</h2>
+<p>Paraphrasing a [classic quote][</p>
+<p>]:</p>
+<p>[classic quote]: http://regex.info/blog/2006-09-15/247</p>
+<blockquote> Some people, when confronted with a problem, think &quot;I know, I&#x27;ll use multiple</blockquote><blockquote> inheritance.&quot; Now they have multiple problems.</blockquote><p>It&#x27;s true, there are real problems with multiple inheritance, but my hunch is they&#x27;ve been blown out of proportion. The number of grizzled C++ programmers who&#x27;ve been personally scarred by multiple inheritance is dwindling over time, and tales of it now are like stories of the boogeyman told around campfires, getting increasingly horrific with each retelling.</p>
+<p>When you get down to it, the two major problems I know of are:</p>
+<ul>
+<li>  Getting duplicate state by having multiple paths to the same base class.</li>
+</ul>
+<ul>
+<li>  Getting ambiguous or confusing dispatch when multiple classes override the</li>
+</ul>
+<p>    same method.</p>
+<p>There are two simple solutions: <em>minimize state</em> and <em>minimize collisions</em>.</p>
+<p>Minimizing state -- as we&#x27;re finally learning from the functional tribe -- is a good idea in general. The less state you have, the easier your code is to understand. So, if you&#x27;re creating a class that&#x27;s intended to be inherited a lot, try to keep the number of fields it defines to a minimum. Ideally, it will just be a bag of methods with no state at all.</p>
+<p>Minimizing collisions can be done by trying to keep your hierarchy as flat as possible. Allowing multiple inheritance actually <em>helps</em> here since you don&#x27;t need deep chains of single inheritance just so your leaf classes can inherit a bunch of stuff. They can directly inherit those pieces all in one flat list.</p>
+<p>Good class design -- cohesion and coherence -- helps too. If your classes each do one small thing and only one thing, odds should be good that they won&#x27;t have any methods that collide. Having name collisions should be a code smell: Why is the same named concept smeared across a bunch of classes?</p>
+<h2>So just use composition</h2>
+<p>What I&#x27;m describinh sounds a lot more like composition than inheritance. The way MyWidget is constructed, we literally <em>are</em> composing it: the base classes are properties on it directly. So why not just use that? Why shouldn&#x27;t the above example simply be:</p>
+<pre class="javascript"><code>var widget = new MyWidget(&#x27;Abe&#x27;);
+
+// From Widget:
+log(widget.getWidget().getName());
+
+// From Hideable:
+widget.getHideable().hide();
+
+// From Container:
+widget.getContainer().addChild(new MyWidget(&#x27;Ben&#x27;));</code></pre>
+<p>Aside from the fact that it&#x27;s ugly, there&#x27;s one thing I don&#x27;t like about that. The fact that MyWidget gets <code>hide()</code> from Hideable should be an implementation detail. From the caller&#x27;s perspective, <code>hide()</code> is something a MyWidget can do, it doesn&#x27;t and shouldn&#x27;t care <em>how</em> or where that code is defined.</p>
+<h2>Where to next</h2>
+<p>What all of this boils down to is how I&#x27;d like to be able to code. I want to be able to build my classes by composing them out of a flat set of reusable traits. I don&#x27;t want framework designers to spend weeks agonizing over brittle hierarchies that still leave some users in the cold. Instead, I want them to be able to say, &quot;Here&#x27;s our 31 different toppings, mix in any ones you like&quot;.</p>
+<p>At the same time, I&#x27;d like those traits/mixins/whatever to themselves be open to extension. Let&#x27;s say there&#x27;s an &quot;enumerable&quot; trait that any traversable collection class inherits. I want to be able to add methods like <code>map()</code> and <code>fold()</code> directly to that class so that I can use those methods on every <em>enumerable</em> class in my codebase without having to shunt over to [ugly useless helper classes][collections</p>
+<p>] like <code>Collections.max(someEnumerable)</code>.</p>
+<p>[collections]: https://docs.oracle.com/javase/7/docs/api/java/util/Collections.html</p>
+<p>Less boilerplate, less copy and paste, flatter hierarchies, better composability. That&#x27;s what I&#x27;m going for. </p>

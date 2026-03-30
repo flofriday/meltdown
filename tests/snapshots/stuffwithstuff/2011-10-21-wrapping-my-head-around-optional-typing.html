@@ -1,0 +1,122 @@
+<p>&lt;div class=&quot;update&quot;&gt;</p>
+<p><em>Update 2018/02/22:</em> With the release of <a href="https://medium.com/dartlang/announcing-dart-2-80ba01f43b6">Dart 2.0</a>, Dart <a href="https://dart.dev/dart-2">removed optional types</a> in favor of a full static type system with inference.</p>
+<p>&lt;/div&gt;</p>
+<p>One of the really cool parts about being involved with [Dart][</p>
+<p>] is that I get a lot of first-hand experience with an optionally-typed language. I&#x27;ve been [fascinated][</p>
+<p>] [by][</p>
+<p>] [optional typing][</p>
+<p>] for a while, but there are few opportunities to actually try it out on non-trivial code. With Dart, I get to use an optionally typed language whose lineage goes right back to [one of the original wellsprings][strongtalk</p>
+<p>].</p>
+<p>[dart]: http://dart.dev [fascinated</p>
+<p>]: /2010/08/31/type-checking-a-dynamic-language/ [by]: /2010/09/01/a-type-checking-conundrum/ [optional typing</p>
+<p>]: /2010/10/29/bootstrapping-a-type-system/ [strongtalk]: http://www.strongtalk.org/</p>
+<p>What I found was that it was surprisingly hard to wrap my head around. I initially considered it just sort of halfway between dynamic and static typing, like a 50/50 blend. It turns out, I think, that is more different than that. If there is a line between dynamic languages and static ones, optionally typed ones aren&#x27;t on that line. They float off in their own axis [like imaginary numbers][i</p>
+<p>]. In fact, I think they go off in <em>multiple</em> axes.</p>
+<p>[i]: http://en.wikipedia.org/wiki/Complex_plane</p>
+<p>Before I go into how I <em>think</em> about them, I should probably lay down the basic semantics. Here&#x27;s the super science breakdown on how optional types work in Dart. If you want a more, uh, professional treatment, you can also check out [Gilad&#x27;s less rambling version][unsound</p>
+<p>].</p>
+<p>[unsound]: https://web.archive.org/web/20120113015751/http://www.dartlang.org/articles/optional-types/</p>
+<h2>Type annotations are optional</h2>
+<p>At it&#x27;s heart, Dart is a dynamically typed language, so you can code without any annotations:</p>
+<pre class="dart"><code>sum(a, b) {
+  var result = a + b;
+  return result;
+}</code></pre>
+<p>Here, you&#x27;ve said that <code>a</code>, <code>b</code>, and <code>result</code> can be any type at all and that&#x27;s OK. But you can also choose to provide a type annotation in all of the usual places -- variable declarations, function parameters, or fields, and return types. So this is valid too:</p>
+<pre class="dart"><code>num sum(num a, num b) {
+  var result = a + b;
+  return result;
+}</code></pre>
+<p>Now we&#x27;ve stated our intent that <code>a</code> and <code>b</code> hold numbers. We&#x27;ve also said that <code>sum()</code> should return a number. Note that we didn&#x27;t annotate <code>result</code>. It can still be anything. Dart lets you mix and match untyped and typed code, so here the result of a <code>a + b</code> is assigned to an untyped variable. Likewise, we get the untyped <code>result</code> and use it as the return value for a function with a typed return.</p>
+<p>This mixing and matching is important because it means you can gradually fold types into your code. You can leave them all off while you&#x27;re prototyping and then start filling them in as you&#x27;ve nailed down the design.</p>
+<h3>Tools can use them</h3>
+<p>OK, so you&#x27;ve sprinkled some types through your code. Why bother? What do they do? The most basic &quot;feature&quot; that, surprisingly, does add value, is that they help document your code. Other people reading it can see what types you expect variables to be.</p>
+<p>The next step up on the scale of usefulness is that, since they&#x27;re in the code, tools like IDEs, compilers, and linters are free to do whatever analysis they want using them. Dart does two favors for anyone writing an editor for it:</p>
+<p>1.  <strong>Types have a built-in declarative syntax.</strong> Unlike JavaScript, Python and     other dynamic languages, Dart doesn&#x27;t use an <em>imperative</em> syntax for     defining types. The grammar for classes and interfaces is essentially     static. That means an editor can figure out all of the methods a type     supports just by parsing a source file. There&#x27;s no runtime modifcation or     monkey-patching that it needs to worry about.</p>
+<p>2.  <strong>Variables can have a known type.</strong> If you choose to annotate them (or the     editor can infer them), then it knows the type of a variable. If it knows     the type, then thanks to the previous point, it knows what you can do with     it. Ta-da: auto-complete and refactoring are now possible for a dynamic     language. It can also do static type checking like you get in most     statically-typed languages.</p>
+<h3>They can be checked at runtime</h3>
+<p>But tooling is gilding the lily. When you&#x27;re talking about types, you expect, you know, a <em>type checker</em>. You have that too (at least in the VM -- what types mean when compiled to JS is another interesting story). When you run in checked mode, every type annotation gets checked at runtime. It&#x27;s as if every line of code like this:</p>
+<pre class="dart"><code>int i = someFunction();</code></pre>
+<p>Turns into (more or less, simplifying things a bit) this:</p>
+<pre class="dart"><code>var _temp = someFunction();
+if (_temp is! int) throw &#x27;Type error! Run for your life!&#x27;;
+var i = _temp;</code></pre>
+<p>You can think of every type annotation as an <em>expectation</em>: this thing <em>should</em> be a number here. In checked mode, the VM will constantly validate your expectations and stop if something doesn&#x27;t hold.</p>
+<p>It&#x27;s important to note that these checks are done <em>dynamically</em>, at runtime. There isn&#x27;t a separate static type checking pass. For example, if you have code like this:</p>
+<pre class="dart"><code>if (2 == 3) {
+  // Should never get here.
+  int i = &#x27;not int&#x27;;
+}</code></pre>
+<p>You won&#x27;t see a type error here because execution never actually gets inside the <code>if</code> block. You may be rightly wondering why in the hell you&#x27;d want to wait until runtime to find a type error instead of doing it statically. Dart&#x27;s take is that you can do both.</p>
+<p>Note that we said earlier that tools <em>can</em> do static type checking if they want. What Dart does is <em>also</em> give you the option to perform those checks at runtime. This is actually how most static languages work too. Very few languages are fully statically sound. Most enforce at least some soundness through runtime checks. Consider this Java code:</p>
+<pre class="java"><code>String[] array = new String[5];
+Object[] untyped = array;
+untyped[2] = 123; // Not a string.</code></pre>
+<p>Here we&#x27;re creating an array of strings. Then we assign it to a variable whose type is an array of objects (i.e. anything). Then we try to stuff something that isn&#x27;t a string (but <em>is</em> an object) in it.</p>
+<p>&lt;div class=&quot;update&quot;&gt; &lt;p&gt;&lt;em&gt;Update 2011/10/23:&lt;/em&gt; I was wrongly using an int array here. Changed it to &lt;code&gt;string[]&lt;/code&gt;. I didn&#x27;t realize only arrays of reference types are covariant in Java. &lt;/p&gt; &lt;/div&gt;</p>
+<p>The static type checker won&#x27;t catch this because [arrays are covariant in Java][covariant arrays</p>
+<p>]. That means that to ensure the last line doesn&#x27;t crash your VM, it will do a <em>runtime</em> check every time you set an element in an array to make sure it&#x27;s the right type.</p>
+<p>[covariant arrays]: http://c2.com/cgi/wiki?JavaArraysBreakTypeSafety</p>
+<p>There&#x27;s another common case where you skirt around the static checker and rely on dynamic type tests: casts.</p>
+<pre class="java"><code>void callback(Object data) {
+  // It&#x27;s my callback, so I know the data is an int.
+  int value = (Integer) data;
+}</code></pre>
+<p>There are times when you know more than the type system does and you just forcibly assert your knowledge. Doing so shouldn&#x27;t let you just take down the VM (unlike in C++ where an improper type cast <em>can</em> set your house on fire), so every cast does a runtime check too.</p>
+<p>Since Dart lets you mix untyped and typed code, it just embraces this model of validating at runtime more fully. Doing so has a couple of other advantages:</p>
+<p>1.  <strong>You don&#x27;t have to rely on your type system for security.</strong> Java tries to     rely on the type system and bytecode verification to ensure that code can&#x27;t     maliciously break the security guarantees of the VM. From what I&#x27;ve heard,     doing so turned out to be unbelievably complicated.</p>
+<p>    Dart, on the other hand, can rely on a much simpler runtime model     (isolates) to ensure security boundaries.</p>
+<p>2.  <strong>The type system can be less pessimistic.</strong> Static type systems, by their     fundamental nature, are pessimistic. Since they don&#x27;t know what <em>actual</em>     code paths will execute at runtime and which <em>actual</em> types a variable will     have, they err on the side of caution. They report errors for any code that     <em>may</em> run, or any variables that <em>may</em> have the wrong type.</p>
+<p>    This is good for ensuring real errors don&#x27;t get missed, but it&#x27;s a drag when     it reports false positives. Consider:</p>
+<p>        bool contains(List&lt;Object&gt; collection, Object needle) {           for (final item in collection) {             if (item == needle) return true;           }           return false;         }</p>
+<p>        var numbers = &lt;int&gt;[1, 2, 3, 4];         print(numbers.contains(2));</p>
+<p>    There&#x27;s a type error here according to most static type systems. We&#x27;re     passing a <code>List&lt;int&gt;</code> to a function that takes a <code>List&lt;Object&gt;</code>, which     relies on [covariance][</p>
+<p>], but that isn&#x27;t statically safe. This <code>contains</code>     function <em>could</em> call <code>collection.add(&quot;not an int&quot;)</code> and that would be an     error.</p>
+<p>    However, it <em>doesn&#x27;t actually do that</em>. It&#x27;s using the collection in a way     that&#x27;s perfectly safe with covariance. By loosening the type system, and     relying on dynamic checks to catch <em>actual</em> errors at runtime, we can     reduce the number of false positives that the type system chokes on.</p>
+<p>[covariance]: http://en.wikipedia.org/wiki/Covariance_and_contravariance_%28computer_science%29</p>
+<h3>They can be ignored at runtime</h3>
+<p>This is where things get weird. (Actually, if you&#x27;re a type system person, they&#x27;re already weird because covariant generics are wrong wrong wrong.) I&#x27;ve been talking about checked mode, but there&#x27;s another mode: production mode. In that mode, the type annotations <em>completely ignored</em>. In other words, Dart lets you run this:</p>
+<pre class="dart"><code>int i = &#x27;not int&#x27;;
+bool b = &#x27;not a bool either&#x27;;
+num wtf = i + b;
+print(wtf); // &quot;not intnot a bool either&quot;.</code></pre>
+<p>This probably seems a little odd.</p>
+<p>&lt;img alt=&quot;Your type errors will blot out the sun! Then we will code in the shade.&quot; src=&quot;/image/2011/10/daaart.jpeg&quot; class=&quot;framed&quot;/&gt;</p>
+<p>Maybe more than a little odd. In production mode, Dart behaves exactly as if it were a dynamically-typed language. Imagine if you decided to write your JavaScript like this (not that anyone would be [crazy enough to do that][closure</p>
+<p>]):</p>
+<p>[closure]: https://github.com/google/closure-compiler/wiki/Annotating-JavaScript-for-the-Closure-Compiler</p>
+<pre class="javascript"><code>var /* int */ i = &#x27;not int&#x27;;
+var /* bool */ b = &#x27;not a bool either&#x27;;
+var /* num */ wtf = i + b;
+print(wtf); // &quot;not intnot a bool either&quot;.</code></pre>
+<p>Unsurprisingly, those comments won&#x27;t do anything at runtime. That&#x27;s how Dart runs in production mode.</p>
+<h2>How should you think of this?</h2>
+<p>OK, so what do we have? We have a nice little syntax for jamming type annotations into your program. If you use them, then tools can take advantage of that to help you work with your code. Also, in checked mode, the VM will validate them for you. But in production, they are ignored.</p>
+<p>That... doesn&#x27;t really sound much like a &quot;type system&quot; compared to other languages. In fact, if you try to think of it as a type system, it&#x27;s pretty disappointing. It&#x27;s more like some type... stuff. Instead of thinking of it in terms of type systems, I tried to find something else I was familiar with from other languages that I could map it to. It finally clicked when someone at work referred to them as <em>type assertions</em>.</p>
+<p><strong>Now I get it.</strong></p>
+<p>If you&#x27;ve done C or C++ programming, you&#x27;ve probably used [<code>assert()</code>][assert</p>
+<p>] or some flavor of it. If not, it looks like this:</p>
+<p>[assert]: http://en.wikipedia.org/wiki/Assertion_%28computing%29</p>
+<pre class="c"><code>float divide(float num, float denom) {
+  assert(denom != 0);
+  return num / denom;
+}</code></pre>
+<p>That <code>assert()</code> call evaluates its argument. If the result is false, then <code>assert()</code> aborts the program and starts ringing the alarm bells. Actually, that&#x27;s not entirely true. <em>If you run the program in debug mode</em> and the assertion fails, then it halts.</p>
+<p>Most projects have at least two build configurations. &quot;Debug&quot; is what developers use day in and day out. It has extra diagnostic stuff like symbol table information for debugging, and also includes all of the assertions. But there is also usually a &quot;release&quot; mode. This is the build you ship to customers and run in production. In that mode, the assertions are compiled out. They are erased completely. Sound familiar?</p>
+<p>Now why on Earth would you want to disable your asserts in release mode? Isn&#x27;t that like wearing your life jacket to boating class and then taking it off when you go out on the water?</p>
+<p>It turns out that removing your asserts at runtime actually has a few advantages:</p>
+<p>1.  <strong>It&#x27;s faster.</strong> All of those assert conditions have to be executed and     checked at runtime. That can add a lot of runtime overhead. When I used to     be a game developer, debug builds of games typically ran much slower than     release. (Playing a videogame running at four frames a second is a strange     skill to cultivate.)</p>
+<p>2.  <strong>The app should try its hardest to continue.</strong> Once your program is in the     customer&#x27;s hands, you <em>really</em> don&#x27;t want it to crash. It&#x27;s possible that     some of those assertions are bogus and the app will still actually work if     you run past a failed one. Sure, in rehearsal you stop on the first wrong     note, but once the audience sits down and the curtains go up, <em>the show must     go on.</em></p>
+<p>3.  <strong>The user can&#x27;t handle a failed assertion anyway.</strong> If you <em>were</em> to let     the asserts remain in release mode, what do you do when one fails? In     debug mode, a failed assertion will do all sorts of helpful stuff like     show a stack trace with line numbers, maybe do a heap dump. All that is     really helpful... if you&#x27;re a programmer on the project.</p>
+<p>    If you&#x27;re just Joan User, that&#x27;s utterly useless (and may be a security     hazard!) The best the app could hope to do is show a sad face error message     and restart. There&#x27;s nothing an end user can productively do with the     knowledge that a bug in the code itself has manifested.</p>
+<p>So what Dart does is apply that reasoning to the type assertions themselves. You really can think of type annotations in Dart as being syntactic sugar for this:</p>
+<pre class="dart"><code>var _temp = someFunction();
+assert(_temp is int);
+var i = _temp;</code></pre>
+<p>As a developer, you run in checked mode and Dart gives you much of the benefit of a typed language. All those asserts help you enforce API requirements just like they do in C++ or other languages. In fact, you could adopt this style in JavaScript if you really wanted to.</p>
+<p>By baking a certain flavor of assert (asserting on type) into the <em>syntax</em> of the language itself, Dart makes it easy for tools to parse those type annotations too and provide more contextual information about your code.</p>
+<h2>Is it a type system?</h2>
+<p>The term &quot;type system&quot; carries a lot of implied assumptions and meaning with it. If you take what you know about type systems and look at Dart through that lens, you will be disappointed, infuriated, and/or confused.</p>
+<p>This doesn&#x27;t mean Dart&#x27;s approach to types is a <em>bad feature</em>, just that it&#x27;s not what you think it is. Meatloaf is a pretty terrible dessert, but it&#x27;s a fine entrée. If you don&#x27;t think about type systems and just ask yourself &quot;is the set of features that Dart provides helpful in writing code?&quot;, I think the answer is &quot;yes&quot;. It&#x27;s just not helpful in exactly the same way that type systems in other languages help.</p>
+<p>I don&#x27;t really think of Dart as having a <em>type system.</em> I think of it as having <em>type requirements</em>. I can use types to define what the APIs of my library expect (preconditions) and promise to deliver (postconditions). At runtime, those assertions will be validated so I can figure out which side is failing to live up to its obligation.</p>
+<p>I find that&#x27;s a pretty handy tool to have, and it&#x27;s really nice to get that without having to give up the simplicity and flexibility of a dynamically typed language. </p>

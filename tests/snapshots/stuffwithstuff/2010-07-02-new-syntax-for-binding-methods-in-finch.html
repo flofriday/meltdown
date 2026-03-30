@@ -1,0 +1,55 @@
+<p>I just checked in a small change to [Finch][</p>
+<p>] that I think makes the language read better. There is now [syntactic sugar][</p>
+<p>] for binding a method to an object.</p>
+<p>[finch]: http://finch.stuffwithstuff.com/ [syntactic sugar</p>
+<p>]: http://en.wikipedia.org/wiki/Syntactic_sugar</p>
+<p>When Finch starts up, it runs a &quot;[core][</p>
+<p>]&quot; Finch script that builds a bunch of the standard objects and environment. It used to have a lot of code that looked like this:</p>
+<p>[core]: https://github.com/munificent/finch/blob/master/lib/core.fin</p>
+<pre class="finch"><code>True addMethod: &quot;not&quot; body: { False }
+
+&#x27; Define a for-style loop.
+Ether addMethod: &quot;from:to:step:do:&quot; { |start end step block|
+
+  i &lt;- start
+
+  while: { i &lt;= end } do: {
+    block call: i
+    i &lt;-- i + step
+  }
+}
+
+&#x27; Concatenate two arrays.
+Array prototype addMethod: &quot;++&quot; body: { |right|
+  result &lt;- []
+
+  self each: {|e| result add: e }
+  right each: {|e| result add: e }
+
+  result
+}</code></pre>
+<p>The change is a new &quot;bind&quot; expression using <code>::</code>. This gets rid of the explicit calls to <code>addMethod:body:</code> and replaces them with this:</p>
+<pre class="finch"><code>True :: not { False }
+
+&#x27; Define a for-style loop.
+Ether :: from: start to: end step: step do: block {
+  i &lt;- start
+
+  while: { i &lt;= end } do: {
+    block call: i
+    i &lt;-- i + step
+  }
+}
+
+&#x27; Concatenate two arrays.
+Array prototype :: ++ right {
+  result &lt;- []
+
+  self each: {|e| result add: e }
+  right each: {|e| result add: e }
+
+  result
+}</code></pre>
+<p>It&#x27;s a little shorter and cleaner, but what I really like is that it lets the parser validate your method signature a bit. Where <code>addMethod:body:</code> takes any string as a method name, this ensures that your method name is something the parser won&#x27;t choke on.</p>
+<p>It also ensures you have a single argument for an operator (<code>self</code> is the other, of course), or an argument for each keyword for a keyword message.</p>
+<p>I should take this opportunity to point out that I&#x27;m also starting to get some <a href="http://finch.stuffwithstuff.com/">documentation</a> online too. This and the rest of Finch&#x27;s expression syntax is now <a href="http://finch.stuffwithstuff.com/expressions.html">fully documented</a>. Almost like a real programming language! </p>

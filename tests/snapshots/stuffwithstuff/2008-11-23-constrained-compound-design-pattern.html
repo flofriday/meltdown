@@ -1,0 +1,117 @@
+<p>I&#x27;ve seen a lot of people argue that inheritance is an anti-feature in a language and that it&#x27;s never necessary. That rubs me the wrong way because I use inheritance pretty frequently in a recurring pattern, and I think it works well. I figured the least I could do was try to document it and add to the design pattern language. After thinking about it a bit more, I realized actually I <em>don&#x27;t</em> need inheritance to do it anyway. So, here&#x27;s a little design pattern for you, solved with and without inheritance:</p>
+<blockquote> <strong>Problem:</strong></blockquote><blockquote></blockquote><blockquote> Often you need to define a number of behaviors in terms of (and only in terms</blockquote><blockquote> of) a small set of atomic operations that can be freely combined.</blockquote><p>Consider a UI framework that draws widgets. Each widget needs to be drawn its own way, but all of them are drawn using a few primitive drawing operations: text, lines, and shapes. Since this drawing will happen frequently and at unpredictable times, you want to encourage the widget implementers to only use those basic operations and not call into all sorts of places in the codebase.</p>
+<p>As the API developer, there&#x27;s basically two things you want to provide to your clients: the set of operations, and the sandbox to combine them in. If you make both of those apparent enough, then [they&#x27;ll stick to those operations][ops</p>
+<p>].</p>
+<p>[ops]: http://blogs.msdn.com/brada/archive/2003/10/02/50420.aspx</p>
+<blockquote> <strong>Solution:</strong></blockquote><blockquote></blockquote><blockquote> Allow the user to define a function whose body has access to an object (either</blockquote><blockquote> <code>this</code> or an explicit parameter) that contains only the operations they should</blockquote><blockquote> use to implement the function.</blockquote><p>There&#x27;s two ways I&#x27;ve found myself providing this kind of system, one of which uses inheritance, one of which does not.</p>
+<h2>Operations as protected methods</h2>
+<p>The most frequent way I use the pattern is by defining a base class with a number of protected methods and a single abstract one. The protected methods are the atomic operations, and the abstract one is the sandbox where they&#x27;re used. By making the operations protected (but not virtual), the implication is clear to derivers: these methods are here for your use. The abstract sandbox method says, &quot;here&#x27;s where you do your work&quot;. If you&#x27;ve minimized global and static objects then the limited parameters to the sandbox say, &quot;you only really have access to the methods in <code>this</code>&quot; so just use those. Here&#x27;s an example:</p>
+<pre class="csharp"><code>public abstract class Widget
+{
+    // The sandbox.
+    public abstract void Draw();
+
+    protected void DrawString(string text, int x, int y) { /* */ }
+    protected void DrawLine(int x1, int y1, int x2, int y2) { /* */ }
+    protected void DrawRect(int x, int y, int w, int h) { /* */ }
+}
+
+public class MyWidget : Widget
+{
+    public override void Draw()
+    {
+        DrawString(&quot;MyWidget&quot;, 5, 3);
+        DrawRect(0, 0, 200, 20);
+
+        for (int x = 0; x &lt; 200; x += 5)
+        {
+            DrawLine(x, 15, x, 20);
+        }
+    }
+}</code></pre>
+<p>If you try to go down this path, one limitation you will quickly realize is that often the base class itself doesn&#x27;t have enough contextual information to provide those atomic functions. That needs to be passed in, but you don&#x27;t want the sandbox to have it (since it could then poke at it directly). Here&#x27;s a typical way around it:</p>
+<pre class="csharp"><code>public abstract class Widget
+{
+    // The external public API.
+    public void Draw(DrawContext context)
+    {
+        // Store what we need to implement the atomic operations.
+        mContext = context;
+
+        // But don&#x27;t give it to the sandbox.
+        DrawInternal();
+
+        // Done with it.
+        mContext = null;
+    }
+
+    // The sandbox.
+    protected abstract void DrawInternal();
+
+    protected void DrawString(string text, int x, int y) { /* */ }
+    protected void DrawLine(int x1, int y1, int x2, int y2) { /* */ }
+    protected void DrawRect(int x, int y, int w, int h) { /* */ }
+
+    private DrawContext mContext;
+}</code></pre>
+<p>Now <code>DrawString()</code>, etc. have access to the DrawContext, but the derived widget itself does not.</p>
+<h2>Atomic operations on a parameter</h2>
+<p>If you&#x27;re not a fan of OOP or inheritance, here&#x27;s another way to do the pattern. If you notice above, what we&#x27;re basically doing is providing all of the atomic operations as methods available on <code>this</code>, which is then an implicit argument to the sandbox method <code>Draw()</code>. Instead of using <code>this</code> you can always make those operations on an explicit parameter. Here&#x27;s a way to use that to have different widgets draw differently without using inheritance:</p>
+<pre class="csharp"><code>public class Widget
+{
+    public Widget(Action&lt;DrawOperations&gt; drawFunc)
+    {
+        mDrawFunc = drawFunc;
+    }
+
+    public void Draw(DrawContext context)
+    {
+        mDrawFunc(new DrawOperations(context));
+    }
+
+    private class DrawOperations
+    {
+        public DrawOperations(DrawContext context)
+        {
+            mContext = context;
+        }
+
+        public void DrawString(string text, int x, int y) { /* */ }
+        public void DrawLine(int x1, int y1, int x2, int y2) { /* */ }
+        public void DrawRect(int x, int y, int w, int h) { /* */ }
+
+        private DrawContext mContext;
+
+    }
+
+    private Action&lt;DrawOperations&gt; mDrawFunc;
+}
+
+public Widget MakeMyWidget()
+{
+    Widget widget = new Widget(
+        operations =&gt;
+        {
+            operations.DrawString(&quot;MyWidget&quot;, 5, 3);
+            operations.DrawRect(0, 0, 200, 20);
+
+            for (int x = 0; x &lt; 200; x += 5)
+            {
+                operations.DrawLine(x, 15, x, 20);
+            }
+        });
+    }
+
+    return widget;
+}</code></pre>
+<p>This has the advantage of letting you later change how a widget draws without baking it into the class hierarchy, but may be a bit odd to people with only class-based OOP language experience.</p>
+<h2>A note on patterns</h2>
+<p>There&#x27;s a lot of hype that surrounds the idea of [design patterns][</p>
+<p>]. When [the book][gof</p>
+<p>] first came out, C++ people who were struggling to understand OOP swarmed to it like it contained revelation from on high. After a while, people (especially non-OOP people) rejected that outright and claimed Design Patterns was simply a collection of boilerplate to get around the limitations of crappy OOP languages. Neither of those were ever the intent of [Alexander&#x27;s][tree</p>
+<p>] [pattern language][</p>
+<p>] concept. Patterns are supposed to be a simple clarification of things people are already doing, and the language of patterns is intended to always be evolving and growing. It&#x27;s neither revelation nor prescription (do this, don&#x27;t do that). It&#x27;s simply &quot;here&#x27;s this problem we see often and here&#x27;s a good way we see people solve it.&quot;</p>
+<p>[design patterns]: http://en.wikipedia.org/wiki/Design_pattern_(computer_science) [gof</p>
+<p>]: http://en.wikipedia.org/wiki/Design_Patterns [tree]: https://www.patternlanguage.com/archive/cityisnotatree.html [pattern language</p>
+<p>]: http://en.wikipedia.org/wiki/A_Pattern_Language</p>
+<p>Patterns are <em>not</em> supposed to be complex high-tech innovations (an excellent pattern in <em>A Pattern Language</em> encourages you to put a bench by your front door). If you read the Constrained Compound pattern above and thought, &quot;Oh yeah, I&#x27;ve done something similar a bunch of times,&quot; then <em>good</em>. That familiarity means it&#x27;s a good solution because a lot of people have used it and is worth adding to the language. Now it has a name. </p>

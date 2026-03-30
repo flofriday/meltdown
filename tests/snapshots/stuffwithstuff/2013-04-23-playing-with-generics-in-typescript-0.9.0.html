@@ -1,0 +1,99 @@
+<p>&lt;div class=&quot;update&quot;&gt;</p>
+<p>Oops! I got a bunch of this wrong because <code>Base</code> and <code>Derived</code> have no members. Since TypeScript is structurally typed, that&#x27;s what allows all of the variance I describe below.</p>
+<p>Anders Hejlsberg (!) commented on my post:</p>
+<blockquote> In general, our type system is structural and generics are co-variant—but</blockquote><blockquote> since parameters are naturally contra-variant, in aggregate they end up being</blockquote><blockquote> bi-variant, as you’ve discovered. In your examples, <code>Box&lt;Base&gt;</code> and</blockquote><blockquote> <code>Box&lt;Derived&gt;</code> are interchangeable because they’re structurally equivalent</blockquote><blockquote> (they have the same set of members, namely none). If you add a member to</blockquote><blockquote> <code>Derived</code>, you’ll notice that <code>Box&lt;Base&gt;</code> is no longer assignable to</blockquote><blockquote> <code>Box&lt;Derived&gt;</code>.</blockquote><blockquote></blockquote><blockquote> TypeScript&#x27;s view of classes is that they&#x27;re just declarations of a named</blockquote><blockquote> interface and a constructor function, and the named interface is compatible</blockquote><blockquote> with any other interface that has the same set of members. What’s interesting</blockquote><blockquote> is our treatment of private members. Private members are inherited, but are</blockquote><blockquote> compatible only with themselves. If you add a private member to Base, then</blockquote><blockquote> only interfaces derived from Base can be compatible because only those</blockquote><blockquote> interfaces would have Base’s private member. Thus, private members become</blockquote><blockquote> “brands” that limit you to a particular branch of a hierarchy. This makes</blockquote><blockquote> sense because when a class has only public members, you could potentially</blockquote><blockquote> override every member—so it’s no different from interface. But when a private</blockquote><blockquote> member is introduced, the substitution principle would break down unless you</blockquote><blockquote> ensure every subtype has that exact private member.</blockquote><blockquote></blockquote><blockquote> Fun stuff!</blockquote><p>&lt;/div&gt;</p>
+<p>This was just going to be a comment on [this reddit thread][thread</p>
+<p>], but then it seemed to take on a life of its own, so I figured I may as well &lt;s&gt;milk it for all it&#x27;s worth&lt;/s&gt; make a nice post out of it.</p>
+<p>[thread]: http://www.reddit.com/r/programming/comments/1cyij4/typescript_09_early_previews_with_support_for/</p>
+<p>Yesterday, the TypeScript guys [announced a preview of the new 0.9.0 version][ts</p>
+<p>] of the language featuring generics. I, like a lot of people, was really curious to see what approach they&#x27;d take with them. Retrofitting a type system onto a dynamic language is <em>hard</em> and generics are one of the places where that new suit of armor can really chafe the squishy flesh underneath.</p>
+<p>[ts]: https://devblogs.microsoft.com/typescript/announcing-typescript-0-9/</p>
+<p>This is a topic strangely near to my heart for another reason too. I&#x27;m on the [Dart team][dart</p>
+<p>] and when Dart was announced, we were widely criticized for its type system. Generics are covariant in Dart, which is a mortal sin to many.</p>
+<p>[dart]: http://www.dart.dev</p>
+<p>Now when any new type system comes out, my first thought is, &quot;I wonder if it&#x27;s got covariant generics?&quot; (My second thought is, &quot;God, I need a hobby that doesn&#x27;t involve programming languages.&quot;)</p>
+<p>Some more caveats before I get going:</p>
+<ul>
+<li>  I literally spent five minutes poking at this, so I may have things wrong.</li>
+</ul>
+<ul>
+<li>  Compiling programs with a compiler that isn&#x27;t 1.0 yet and claiming that says</li>
+</ul>
+<p>    something about the language specification is asking for trouble.</p>
+<ul>
+<li>  I, despite my current occupation, am surprisingly bad at reading language</li>
+</ul>
+<p>    specs.</p>
+<ul>
+<li>  I am currently drinking a [fairly strong beer][beer</li>
+</ul>
+<p>].</p>
+<p>[beer]: http://www.ratebeer.com/beer/elysian-bete-blanche-belgian-tripel-2011-and-later/138973/</p>
+<p>OK, party time! After playing around with it a bit, as far as I can tell, <em>TypeScript&#x27;s subtype relations are more permissive than I expected</em>. This isn&#x27;t necessarily bad, just surprising. As a preamble, let&#x27;s define a supertype and subtype:</p>
+<pre class="dart"><code>class Base {}
+class Derived extends Base {}</code></pre>
+<p>Now consider:</p>
+<pre class="dart"><code>class Box&lt;T&gt; {
+  constructor(public value: T) {}
+};</code></pre>
+<p>This is the simplest possible generic type.</p>
+<pre class="dart"><code>var a : Box&lt;Base&gt; = new Box&lt;Base&gt;(null);
+var b : Box&lt;Derived&gt; = new Box&lt;Derived&gt;(null);</code></pre>
+<p>These are both fine, as you would expect.</p>
+<pre class="dart"><code>new Box&lt;number&gt;(&quot;not num&quot;)</code></pre>
+<p>This gives:</p>
+<pre class="text"><code>/generics.ts(5,0): error TS2081: Supplied parameters do not match
+any signature of call target.
+/generics.ts(5,0): error TS2085: Could not select overload for
+&#x27;new&#x27; expression.</code></pre>
+<p>Looks about right. Now let&#x27;s try covariance:</p>
+<pre class="dart"><code>var c : Box&lt;Base&gt; = new Box&lt;Derived&gt;(null);</code></pre>
+<p>No errors. Contravariance?</p>
+<pre class="dart"><code>var d : Box&lt;Derived&gt; = new Box&lt;Base&gt;(null);</code></pre>
+<p>Still no errors. This, I think, makes its type system looser than arrays in Java, and more permissive than Dart. Generics are <em>bi</em>variant in TypeScript.</p>
+<pre class="dart"><code>var e : Box&lt;number&gt; = new Box&lt;string&gt;(null);</code></pre>
+<p>As a sanity check, this <em>does</em> give an error.</p>
+<pre class="text"><code>/generics.ts(73,4): error TS2012: Cannot convert &#x27;Box&lt;string&gt;&#x27; to
+&#x27;Box&lt;number&gt;&#x27;: Types of property &#x27;value&#x27; of types &#x27;Box&lt;string&gt;&#x27; and
+&#x27;Box&lt;number&gt;&#x27; are incompatible.</code></pre>
+<p>So it doesn&#x27;t just <em>ignore</em> the type parameters, it really is bivariant: it will allow either a subtype or supertype relation for the type parameters, but not no relation at all.</p>
+<p>Part of this may be because TypeScript&#x27;s type system is structural (neat!). For example:</p>
+<pre class="dart"><code>class A {
+  foo(arg : Base) {}
+}
+
+class B {
+  foo(arg : Derived) {}
+}</code></pre>
+<p>Here we have two unrelated types that happen to have the same shape (method names and signatures). Perhaps surprisingly, there&#x27;s no error here:</p>
+<pre class="dart"><code>var f : A = new B();
+var g : B = new A();</code></pre>
+<p>This is perhaps extra surprising because <code>A</code> and <code>B</code> don&#x27;t have the <em>exact</em> same signatures: their parameter types for <code>arg</code> are different. So the type system is both structural and allows either supertype or subtypes on parameters.</p>
+<p>If the type system is structural, maybe the <code>Box&lt;T&gt;</code> examples only worked then because it had no methods (aside from the <code>value</code> property) that used the type parameter. What if we make sure <code>T</code> shows up in parameter and return positions?</p>
+<pre class="dart"><code>class Box&lt;T&gt; {
+  constructor(public value: T) {}
+  takeParam(arg: T) {}
+  returnType(): T { return null; }
+};</code></pre>
+<p>Nope, this makes no difference. Still same behavior as before.</p>
+<p>I believe the relevant bits of the spec are:</p>
+<blockquote> <strong>3.6.2.1 Type Arguments</strong></blockquote><blockquote></blockquote><blockquote> A type reference to a generic type G designates a type wherein all</blockquote><blockquote> occurrences of G’s type parameters have been replaced with the actual type</blockquote><blockquote> arguments supplied in the type reference.</blockquote><p>I think this basically says that generics are structurally typed and the type relation is determined based on the <em>expanded</em> type where type arguments have been applied. In other words, generic types don&#x27;t have type relations, just generic type <em>applications</em>. For example:</p>
+<pre class="dart"><code>class Generic&lt;T&gt; {
+  method(arg: T) {}
+}
+
+class NotGeneric {
+  method(arg: number) {}
+}
+
+var h : NotGeneric = new Generic&lt;number&gt;();</code></pre>
+<p>This is fine in TypeScript unlike most nominally-typed languages. Pretty neat!</p>
+<blockquote> <strong>3.8.2 Subtypes and Supertypes</strong></blockquote><blockquote></blockquote><blockquote> S is a subtype of a type T, and T is a supertype of S, if one of the</blockquote><blockquote> following is true:</blockquote><blockquote></blockquote><blockquote>   - S’ and T are object types and, for each member M in T, one of the</blockquote><blockquote>     following is true:</blockquote><blockquote></blockquote><blockquote>       - M is a non-specialized call or construct signature and S’ contains a</blockquote><blockquote>         call or construct signature N where, when substituting ‘Object’ for</blockquote><blockquote>         all type parameters declared by M and N (if any),</blockquote><blockquote></blockquote><blockquote>           - for parameter positions that are present in both signatures,</blockquote><blockquote>             **each parameter type in N is a subtype or supertype of the</blockquote><blockquote>             corresponding parameter type in M**,</blockquote><blockquote></blockquote><blockquote>           - the result type of M is Void, or the result type of N is a</blockquote><blockquote>             subtype of that of M</blockquote><blockquote></blockquote><blockquote>           - ...</blockquote><blockquote></blockquote><blockquote>       - ...</blockquote><blockquote></blockquote><blockquote>   - ...</blockquote><p>My emphasis added. I believe this basically says that to compare two types, you walk their members and compare their types. For method parameters, &quot;subtype or supertype&quot; means bivariance: types go both ways. This is looser than the normal function typing rule which is contravariance for parameters and covariance for returns.</p>
+<p>All in all, I find this pretty interesting. TypeScript has both a structural and prototypal type system, so it&#x27;s already pretty fascinating from a language design perspective. Allowing bivariance of parameter types is a pretty bold extension of that.</p>
+<p>Oh, if you&#x27;d like to see this for yourself, here&#x27;s how:</p>
+<pre><code>$ git clone https://git01.codeplex.com/typescript
+$ cd typescript
+$ git checkout develop
+$ jake local
+$ chmod +x bin/tsc</code></pre>
+<p>Then you can run <code>bin/tsc</code> to compile stuff with the bleeding edge compiler. The latest spec is under <code>doc/TypeScript Language Specification.pdf</code>. </p>

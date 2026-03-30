@@ -1,0 +1,275 @@
+<p>*You&#x27;ll probably want to read [part one][</p>
+<p>] first unless you&#x27;re feeling brave.*</p>
+<p>[part one]: /2013/01/13/iteration-inside-and-out/</p>
+<p>In our last episode, we learned that iteration involves two chunks of code: one generating values, and one consuming them. During a loop, these two chunks take turns in a cycle of generate, consume, generate, consume, like some sort of weird incremental Ouroboros. This means that one chunk has to fully return and unwind its stack frames before it can hand off to the next one.</p>
+<p>We also learned that external and internal iterators each nail some problems and totally fail at others. The discrepency boils down to which chunk of code has more useful stuff to store on the callstack.</p>
+<p>With external iterators, the code <em>consuming</em> values has control over the stack, so it works well with problems where most complexity is in consuming values. For example, short-circuiting or interleaving multiple iterators is trivial in an external iterator.</p>
+<p>Conversely, internal iterators put the code <em>generating</em> values in control. They excel when generating values is complicated, like walking a tree and iterating over the nodes.</p>
+<p>Now we&#x27;ll see some techniques to deal with each style&#x27;s shortcomings. The basic idea is [<em>reification</em>][reify</p>
+<p>]. If you&#x27;ve got some data on the callstack that you want to hang onto, you need to find a place to store it.</p>
+<p>[reify]: http://en.wikipedia.org/wiki/Reification_(computer_science)</p>
+<h2>Iterators and generators</h2>
+<p>Say we want to define a method that concatenates two sequences. We don&#x27;t want to actually create a data structure that contains the elements of both, we just want to return an iterator that walks the first sequence and then the second one. Here&#x27;s how you could do that in C#:</p>
+<pre class="csharp"><code>IEnumerable Concat(IEnumerable a, IEnumerable b)
+{
+  return new ConcatEnumerable(a, b);
+}
+
+class ConcatEnumerable
+{
+  IEnumerable a;
+  IEnumerable b;
+  ConcatEnumerable(IEnumerable a, IEnumerable b)
+  {
+    this.a = a;
+    this.b = b;
+  }
+
+  IEnumerable GetEnumerator()
+  {
+    return new ConcatEnumerator(
+        a.GetEnumerator(), b.GetEnumerator());
+  }
+}
+
+class ConcatEnumerator
+{
+  IEnumerator a;
+  IEnumerator b;
+  bool onFirst = true;
+  ConcatEnumerator(IEnumerator a, IEnumerator b)
+  {
+    this.a = a;
+    this.b = b;
+  }
+
+  bool MoveNext()
+  {
+    // Which sequence are we on?
+    if (onFirst)
+    {
+      // Stay on first.
+      if (a.MoveNext()) return true;
+
+      // Move to the next sequence.
+      onFirst = false;
+      return b.MoveNext();
+    }
+
+    // On second.
+    return b.MoveNext();
+  }
+
+  Object Current
+  {
+    get { return onFirst ? a.Current : b.Current; }
+  }
+}</code></pre>
+<p>Oof, that seems like a pile of code for such a simple goal. The problem is that we&#x27;ve got all of this state to maintain: the two sequences being iterated, which one we&#x27;re in, and where we are in it. Since this is an <em>external</em> iterator, we can&#x27;t just store that as local variables on the stack because we have to return from <code>MoveNext()</code> between each item.</p>
+<p>But but but! C# has something called <em>iterators</em>. (A confusing name. What other languages call &quot;iterators&quot;, C# calls &quot;enumerators&quot;. So &quot;iterator&quot; means something special in C#-land.) The above code can also be written:</p>
+<pre class="csharp"><code>IEnumerable Concat(IEnumerable a, IEnumerable b)
+{
+  foreach (var item in a) yield return item;
+  foreach (var item in b) yield return item;
+}</code></pre>
+<p>How&#x27;s that for an improvement? (Note: if your employer pays you by the line, you&#x27;ll want to avoid this.) The magic here is <code>yield return</code>. When a method contains it, the compiler turns the method into an <em>iterator</em>. You can think of it sort of as a &quot;resumable method&quot;. When you call <code>Concat()</code>, it runs to the first <code>yield return</code>, then stops. Then when you resume it, it picks up where it left after the <code>yield return</code>.</p>
+<p>So here it iterates through the first sequence, stopping at each item and returning it. Then it does the same thing with the second sequence. But what does it mean to &quot;resume&quot; a method?</p>
+<p>The return type here clarifies that. When you call <code>Concat()</code>, what you get back is an <code>IEnumerable</code>. This is C#&#x27;s [iterable sequence type][ienumerable</p>
+<p>]. So what you get back is a &quot;collection&quot;. &quot;Resuming the method&quot; just means &quot;get the next value in the sequence&quot;.</p>
+<p>[ienumerable]: http://msdn.microsoft.com/en-us/library/system.collections.ienumerable.aspx</p>
+<p>So, given the above, we&#x27;ve got a nice solution to our original problem. We can use it like so:</p>
+<pre class="csharp"><code>foreach (var item in Concat(stuff, moreStuff))
+{
+  Console.WriteLine(item);
+}</code></pre>
+<p>Using <code>yield return</code> lets us store all of the interesting state -- the two sequences and our current location in them -- just as local variables right in the <code>Concat()</code> method. C# will <em>reify</em> that stuff for us so that when the <code>Concat()</code> method &quot;returns&quot;, that data gets squirreled away somewhere safe.</p>
+<p>You may wonder how C# does that reification. That&#x27;s kind of the funny bit. In the case of C#, the answer is that the compiler itself [automatically generates a little hidden class][hidden</p>
+<p>] exactly like our ConcatEnumerator up there. The actual runtime (the [CLR][</p>
+<p>]) doesn&#x27;t have any support for <code>yield return</code>. It&#x27;s done purely by automatically generating code at compile time. It&#x27;s a large, delicious lump of [syntactic sugar][</p>
+<p>].</p>
+<p>[hidden]: http://startbigthinksmall.wordpress.com/2008/06/09/behind-the-scenes-of-the-c-yield-keyword/ [CLR</p>
+<p>]: http://en.wikipedia.org/wiki/Common_Language_Runtime [syntactic sugar]: http://en.wikipedia.org/wiki/Syntactic_sugar</p>
+<p>In the last post, I crafted some glorious ASCII art showing where all of the state is being stored. The main problem was that the state for the code generating values and the state for the code consuming them both live on the stack. Using an iterator, though, gives you this:</p>
+<pre class="asciiart"><code>stack                       heap
+┌─────────────────────┐
+│ iterator.MoveNext() │
+├─────────────────────┤     ┌───────────────────┐
+│ loop body           │ ──&gt; │ DesugaredIterator │
+└─────────────────────┘     └───────────────────┘
+  ...
+
+  main()</code></pre>
+<p>So the stack has the state for the code consuming values. But the state needed to generate values lives on the <em>heap</em>. There&#x27;s an instance of this little class that the compiler created for us. When <code>MoveNext()</code> returns, we don&#x27;t trash the state because it&#x27;s still over there in the heap available the next time we call <code>MoveNext()</code>.</p>
+<p>There are a few other languages that do (or will) work this way. Python calls these &quot;[generators][py</p>
+<p>]&quot; and uses a similar <code>yield</code> statement. The next version of JavaScript will have [something similar][js</p>
+<p>]. The language that invented generators and the <code>yield</code> keyword was Barbara Liskov&#x27;s [CLU][</p>
+<p>], immortalized forever in [Tron][</p>
+<p>]. (I&#x27;m not making that up.)</p>
+<p>[py]: http://www.python.org/dev/peps/pep-0255/ [js</p>
+<p>]: http://wiki.ecmascript.org/doku.php?id=harmony:generators [CLU]: http://en.wikipedia.org/wiki/CLU_(programming_language) [TRON</p>
+<p>]: http://en.wikipedia.org/wiki/List_of_Tron_characters#CLU</p>
+<h3>Deep yields</h3>
+<p>There&#x27;s a limitation here, though. You can only yield from the method itself. Let&#x27;s say (for whatever reason) we wanted to organize our C# code like:</p>
+<pre class="csharp"><code>IEnumerable Concat(IEnumerable a, IEnumerable b)
+{
+  WalkFirst(a);
+  WalkSecond(b);
+}
+
+IEnumerable WalkFirst(IEnumerable a)
+{
+  foreach (var item in a) yield return item;
+}
+
+IEnumerable WalkSecond(IEnumerable a)
+{
+  foreach (var item in a) yield return item;
+}</code></pre>
+<p>What we <em>want</em> to have happen is that the <code>yield return</code> in <code>WalkFirst()</code> and <code>WalkSecond()</code> causes <code>Concat()</code> itself to yield and return, but it doesn&#x27;t work that way. Iterators/generators reify a stack frame for you, but they only reify <em>one</em>. If you want to have your iteration logic call other methods which also yield, you have to manually reify every level yourself by walking the sequence at each level. Something like:</p>
+<pre class="csharp"><code>IEnumerable Concat(IEnumerable a, IEnumerable b)
+{
+  foreach (var item in WalkFirst(a)) yield return item;
+  foreach (var item in WalkSecond(a)) yield return item;
+}
+
+IEnumerable WalkFirst(IEnumerable a)
+{
+  foreach (var item in a) yield return item;
+}
+
+IEnumerable WalkSecond(IEnumerable a)
+{
+  foreach (var item in a) yield return item;
+}</code></pre>
+<p>You see how we&#x27;re doing <code>foreach</code> and <code>yield return</code> both in the <code>Walk___()</code> methods <em>and</em> in <code>Concat()</code> itself? We&#x27;re explicitly making <em>every</em> level of the callstack an iterator. That makes sure every call frame gets reified like we need. Can we do better?</p>
+<h2>Python 3.3: delegating generators</h2>
+<p>The above example can be translated to Python like so:</p>
+<pre class="python"><code>def concat(a, b):
+  for item in walkFirst(a): yield item
+  for item in walkSecond(a): yield item
+
+def walkFirst(a):
+  for item in a: yield item
+
+def walkSecond(a):
+  for item in b: yield item</code></pre>
+<p>Aside from being more terse, this is a one-to-one mapping with the C# code. But Python 3.3 adds [something new][380</p>
+<p>] for us here. Let&#x27;s use it:</p>
+<p>[380]: http://www.python.org/dev/peps/pep-0380/</p>
+<pre class="python"><code>def concat(a, b):
+  yield from walkFirst(a)
+  yield from walkSecond(a)
+
+def walkFirst(a):
+  for item in a: yield item
+
+def walkSecond(a):
+  for item in b: yield item</code></pre>
+<p>The explicit loops in <code>concat()</code> have been replaced with a new <code>yield from</code> statement. Nice. This makes composing generators a little cleaner. But there&#x27;s no real magic here. We still have to have <code>yield</code> at every level of our iteration code.</p>
+<p>In most cases, this is just a bit tedious but not a showstopper. But if you have higher-order functions this can actually prevent code reuse. If you have some higher-order function that takes a callback, it doesn&#x27;t know if that callback wants to yield or not, so the higher-order function doesn&#x27;t know if <em>it</em> needs to yield. You may end up having to implement that function twice, once for each style.</p>
+<p>So <code>yield from</code> is only a tiny improvement. Can we do better?</p>
+<h2>Ruby: enumerables, enumerators, and fibers</h2>
+<p>If you ever find yourself in a game of &quot;which language has a better feature than X&quot;, Ruby is usually a safe play. Matz has culled an impressive array of features from Smalltalk and Lisp. (And let&#x27;s not forget Perl, the ugly duckling paddling around Ruby&#x27;s Pond of Inspiration.)</p>
+<p>In Ruby, iteration is usually internal. The idiomatic way to go through a collection is by passing a [block][block</p>
+<p>] -- more or less a callback, if you&#x27;re not familiar with Ruby/Smalltalk parlance -- to the <code>each</code> method on a collection. But it also supports external iterators and a <code>for</code> expression. Impressively, Ruby can convert the former to the latter. (Going the other way is trivial in any language.)</p>
+<p>[block]: http://eli.thegreenplace.net/2006/04/18/understanding-ruby-blocks-procs-and-methods/</p>
+<p>Let&#x27;s dig up an example from the previous post. Here&#x27;s some Ruby code for defining a tree and iterating over the nodes of the tree in order:</p>
+<pre class="ruby"><code>class Tree
+  attr_accessor :left, :label, :right
+
+  def initialize(left, label, right)
+    @left = left
+    @label = label
+    @right = right
+  end
+
+  def each(&amp;code)
+    @left.each &amp;code if @left
+    code.call(self)
+    @right.each &amp;code if @right
+  end
+end</code></pre>
+<p>We can use it like:</p>
+<pre class="ruby"><code>tree.each { |node| puts node.label }</code></pre>
+<p>This is using internal iteration. We pass in that <code>{ |node| ... }</code> block and the Tree class itself recursively walks the nodes and invokes the callback on each node.</p>
+<p>Say we want this to be an external iterator instead. Maybe we want to walk two trees in parallel to see if they have the same labels. We can do this something like:</p>
+<pre class="ruby"><code>class Tree
+  # Mixin all of the enumerable methods to our class.
+  include Enumerable
+end
+
+a = # Some tree...
+b = # Another tree...
+
+if a.zip(b).each.all? { |pair| pair[0] == pair[1] }
+  puts &quot;Equal!&quot;
+end</code></pre>
+<p>The <code>zip()</code> method takes an enumerable on the left and another on the right and &quot;zips&quot; them together one pair at a time. The result is an array of pairs of elements. If you zip <code>[1, 2, 3]</code> and <code>[7, 8, 9]</code> together, you get `[[1, 7], [2, 8</p>
+<p>], [3, 9]</p>
+<p>]`. Neat.</p>
+<p>Then <code>all?</code> walks an array, testing each element using the given block. If the block returns <code>true</code> for every element, <code>all?</code> returns <code>true</code> too. Swell.</p>
+<p>But there&#x27;s a subtle problem here. The <code>zip()</code> method converts its arguments to <em>arrays</em> before doing anything. So we&#x27;ve got our nice <code>each</code> method on Tree that generates values incrementally without wasting memory, but then we throw the iterator at <code>zip()</code> which goes ahead and allocates big arrays to store all of these intermediate values. If the two trees we&#x27;re comparing are huge, that&#x27;s a lot of wasted memory.</p>
+<p>What we&#x27;d like is a way to walk those two trees <em>iteratively</em> without creating any intermediate arrays. The <code>each()</code> method on Tree does that, but it&#x27;s an internal iterator. External iterators are perfect for this task. Can we convert it? In Ruby, that&#x27;s as easy as:</p>
+<pre class="ruby"><code>a = # Some tree...
+b = # Another tree...
+
+a_enum = a.to_enum
+b_enum = b.to_enum</code></pre>
+<p>That little <code>to_enum</code> method takes an object that implements <code>each</code> and returns an external iterator. We can use these iterators like so:</p>
+<pre class="ruby"><code>loop do
+  if a_enum.next != b_enum.next
+    puts &quot;Not equal!&quot;
+  end
+end</code></pre>
+<p>The protocol here is that <code>next</code> returns the next item in the sequence. If there are no more items, it raises a StopIteration error which <code>loop</code> conveniently catches and handles.</p>
+<p>Double-plus good! We&#x27;ve got nice support for both internal and external iterators, and we can easily convert back and forth between them. It&#x27;s like having cake <em>and</em> pie for dessert. The one remaining question is <em>how does this work</em>? Look at what we have here:</p>
+<p>1.  The internal iterator (the <code>each()</code> method on Tree) recursively calls itself     and builds a deep callstack. At any point during that, it may emit values.</p>
+<p>2.  The <code>to_enum</code> method takes that and returns an enumerable object. When you     call <code>next</code>, it runs that recursive code then somehow suspends it whenever a     value is generated.</p>
+<p>3.  The next time you call <code>next</code> execution picks up exactly where it left off.     Somehow that entire callstack gets frozen and then thawed between each call     to <code>next</code>.</p>
+<p>There must be some kind of data structure that represents an entire callstack. It doesn&#x27;t reify a stack <em>frame</em> like generators, it reifies the whole <em>stack.</em></p>
+<h2>A fiber by any other name</h2>
+<p>This mystery data structure is what Ruby calls a <em>fiber</em>. Its sort of like a thread in that it represents an in-progress computation. It has a callstack, local variables, etc. Unlike a &quot;real&quot; thread, though, it doesn&#x27;t involve the OS, kernel scheduling and all of that other heavyweight stuff.</p>
+<p>It&#x27;s also <em>cooperatively</em> scheduled instead of <em>preemptively</em>. That&#x27;s a fancy way of saying fibers have to play nice with other. If you want a fiber to run, you have to give it control. It can&#x27;t take control from you.</p>
+<p>These constructs have been given as many names as languages that support them. Lua calls them &quot;[coroutines][lua</p>
+<p>]&quot; (which is, I think, the [oldest name][coroutine</p>
+<p>] for the idea). [Stackless Python][</p>
+<p>] calls them &quot;tasklets&quot;. Go&#x27;s &quot;[goroutines][</p>
+<p>]&quot; are similar, though with some interesting differences.</p>
+<p>[lua]: http://www.lua.org/pil/9.html [coroutine</p>
+<p>]: http://en.wikipedia.org/wiki/Coroutine [stackless python]: http://www.stackless.com/ [goroutines</p>
+<p>]: http://golang.org/doc/effective_go.html#goroutines</p>
+<p>Fibers are the special sauce we need for <code>to_enum</code>. When you call <code>to_enum</code>, Ruby spins up a new fiber. Then the interpreter runs the internal iterator on that <em>new</em> fiber. When you call <code>next</code> on the enumerator, Ruby runs that fiber until it generates a value. When a value is yielded, Ruby suspends the fiber, returns the value, and runs the main fiber. When we need the next value, Ruby just suspends the main fiber and resumes the spawned one again.</p>
+<p>In other words, a simplified implementation of <code>to_enum</code> looks a bit like:</p>
+<pre class="ruby"><code>class Object
+  def to_enum
+    MyEnumerator.new self
+  end
+end</code></pre>
+<p>And the MyEnumerator class (which is simplified from [this excellent StackOverflow answer][so</p>
+<p>]) is:</p>
+<p>[so]: http://stackoverflow.com/a/1437678/9457</p>
+<pre class="ruby"><code>class MyEnumerator
+  include Enumerable
+
+  def initialize(obj)
+    @fiber = Fiber.new do  # Spin up a new fiber.
+      obj.each do |value|  # Run the internal iterator on it.
+        Fiber.yield(value) # When it yields a value, suspend
+                           # the fiber and emit the value.
+      end
+      raise StopIteration  # Then signal that we&#x27;re done.
+    end
+  end
+
+  def next
+    @fiber.resume          # When the next value is requested,
+                           # resume the fiber.
+  end
+end</code></pre>
+<h2>Iteration or concurrency?</h2>
+<p>I started this two-parter with a question about how you can make iteration beautiful and easy to work with. This leads us to wanting both internal and external iteration, and the ability to go from one to the other. The piece needed to really make that work is <em>an easy way to create a new callstack</em>. And fibers are a great answer for that.</p>
+<p>But what I find interesting is where we arrived at. We started talking about <em>iteration</em>, one of the most shallow of flow control structures. But look where we ended up. Fibers are a <em>concurrency</em> mechanism. Concurrency is way over in the deep end of language features.</p>
+<p>I don&#x27;t think this is a coincidence. If you look at iteration, it actually is about concurrency. You&#x27;ve got two &quot;threads&quot; of behavior: one that&#x27;s generating values and one that&#x27;s consuming them. You need to run these two threads together and coordinate them. That <em>is</em> concurrency. We&#x27;re just so used to it, that we don&#x27;t think of it that way.</p>
+<h2>Wait, what about Magpie?</h2>
+<p>I screwed myself over here. The secret agenda of this pair of posts was to trick you into reading about <em>my</em> language by promising to teach you something about other languages you may actually use in real life.</p>
+<p>If we&#x27;re both lucky you did learn something, but I haven&#x27;t gotten to my language yet. Alas, I&#x27;m already 5,000 words in and I&#x27;ve surely exhausted your patience. I guess Magpie will have to wait for a later post. Trust me, though. It&#x27;s <em>awesome</em>. Promise. </p>

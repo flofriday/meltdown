@@ -1,0 +1,129 @@
+<p>[Magpie][</p>
+<p>] has reached a strange but neat little milestone on the road from &quot;weird experiment&quot; to &quot;real language&quot;: the type system is now bootstrapped. I&#x27;m not aware of any other languages where a statement like that is even <em>meaningful</em> (maybe [Typed Scheme][</p>
+<p>]?), much less <em>true</em>, so I&#x27;ll try to break that down.</p>
+<p>[magpie]: https://magpie-lang.org/ [typed scheme</p>
+<p>]: https://cs.brown.edu/courses/cs173/2008/Manual/typed-scheme/index.html</p>
+<p>Even if you&#x27;re not interested in Magpie, my hope is that you can at least get a better picture of how type systems work in general from this. But, as a warning, this ventures into an echelon of programming language nerdery that few care to explore. I&#x27;ll try not to be too boring, but no promises.</p>
+<h2>What is a type?</h2>
+<p>&quot;Type&quot; like a lot of other simple words (&quot;object&quot; anybody?) ends up with a lot of fuzzy overlapping definitions in programming: classes, runtime types, prototypes, type objects, etc. In dynamically typed languages you&#x27;ll hear &quot;values have type&quot; while others say those languages have no types.</p>
+<p>Magpie makes this distinction <em>very</em> blurry, but for our purposes what I care about is the static definition of a type: it&#x27;s the stuff that the type checker works with. For example, say you create a variable:</p>
+<pre class="magpie"><code>var i = 123</code></pre>
+<p>The type checker tracks that <code>i</code> is an integer. It does so by associating an object -- a <em>thing</em> -- with that name. That object is a type. If you think of types as objects that the type checker works with, that leads to the natural question of what operations on types we need to support. For Magpie, there are two important ones:</p>
+<h3>Assignment compatibility</h3>
+<p>The first operation is a test for assignment compatibility (i.e. the subtype relation). Put plainly, if we have a variable of type <code>A</code>, and we&#x27;re trying to assign to it a value of type <code>B</code>, is that kosher? This sounds like it&#x27;s limited to variables, but that core operation covers almost everything you need to do with a type. It&#x27;s equivalent to asking, &quot;Is <code>B</code> a subtype of <code>A</code>?&quot; and covers things like, &quot;Can I pass an argument of type <code>A</code> to a function declared to expect type <code>B</code>?&quot;</p>
+<p>So, with this operation, we can track how types are related to each other, and make sure we don&#x27;t pass or assign values of the wrong type.</p>
+<h3>Member type</h3>
+<p>The other operation, which is a little more OOP-specific, is determining if a type has a member with a given name, and, if so, what its type is. This helps us ensure we aren&#x27;t calling unsupported methods or accessing undefined fields on a class. For example, if we have a chunk of code like:</p>
+<pre class="magpie"><code>list add(&quot;item&quot;)</code></pre>
+<p>The type checker needs to get the type of the <code>list</code> variable and ask it what the type of its <code>add</code> member is. If the answer to that is nothing (i.e. it doesn&#x27;t have that member) or not a function that accepts a string, then that method call is an error.</p>
+<h2>An interface for types</h2>
+<p>If you have an OOP mindset, you can look at those two operations as defining an interface. If you were implementing a type checker in Java, you could define a type to be any class that implements:</p>
+<pre class="java"><code>interface Type {
+  boolean canAssignFrom(Type other);
+  Type getMemberType(String name);
+}</code></pre>
+<p>The concrete classes that represented kinds of types (say &quot;Class&quot;, &quot;Interface&quot;, &quot;Array&quot;, etc.) would then implement that interface and you&#x27;re good to go. The Magpie interpreter does exactly that.</p>
+<h2>First-class types</h2>
+<p>It&#x27;s just that <em>where</em> it does that is kind of unusual. In Magpie, all types are first-class, like Ruby or Python. For example:</p>
+<pre class="magpie"><code>var monkey = Monkey new(&quot;Bobo&quot;)</code></pre>
+<p>In this code, <code>Monkey</code> is just a global variable whose value is an object representing the <code>Monkey</code> class. So classes are first-class objects.</p>
+<p>But there are <em>types</em> that are not <em>classes</em>. For example, &quot;array of ints&quot; is a type, but it&#x27;s not a class. Magpie also has [ad-hoc unions][union</p>
+<p>], so &quot;int or string&quot; is a type, but it&#x27;s not a class.</p>
+<p>[union]: /2010/08/23/void-null-maybe-and-nothing/</p>
+<p>It would be perfectly valid for <em>classes</em> to be first-class, without having all types be first-class, except for one important thing: generics. Magpie has generics because I&#x27;m firmly of the opinion that a type system without generics is about as useful as a language with functions but no parameters. Do you really want a language whose type system is as expressive as <code>GOSUB</code> in BASIC?</p>
+<p>Given generics, you should be able to instantiate them with any <em>type</em>, not just any <em>class</em>. That way, you can create things like &quot;collection of array of ints&quot;. It&#x27;s also important for type arguments in generics to be [reified][</p>
+<p>] (unlike [Java&#x27;s half-baked generics][erasure</p>
+<p>]). If you have a &quot;list of ints&quot; it should <em>know</em> that it&#x27;s a list of ints and be able to act on that fact.</p>
+<p>[reified]: http://stackoverflow.com/questions/557340/c-generic-list-t-how-to-get-the-type-of-t/557355#557355 [erasure</p>
+<p>]: https://en.wikipedia.org/wiki/Generics_in_Java#Problems_with_type_erasure</p>
+<p>Those last two points -- that any type can be a type argument in a generic, and that type arguments should be reified -- means that all types really do need to be first-class objects in Magpie.</p>
+<h2>Piercing the veil</h2>
+<p>So, going down this path, we find ourselves in a weird place. Over in the Java type checking code, we have some <code>Type</code> interface and a bunch of Java classes that implement it. The type system is fully fleshed out in Java. Meanwhile, on the other side of the veil we have these first-class objects in Magpie that also fully implement the type system.</p>
+<p>That&#x27;s redundant, kind of ugly, and hard to manage. To get rid of that redundancy, we&#x27;ll kill one side. Which one? We know we need types to be first class in Magpie, so that really only leaves one option: yank the type system out of Java.</p>
+<h2>What a type checker does</h2>
+<p>A type checker is actually a pretty simple piece of software. It basically walks through a chunk of code tracking the types of the operations and checking them for validity. For example, consider:</p>
+<p>    print((1 + 2) string)</p>
+<p>The parser converts that into an [AST][</p>
+<p>], a little tree like:</p>
+<p>[ast]: http://en.wikipedia.org/wiki/Abstract_syntax_tree</p>
+<pre class="text"><code>(print)
+   |
+(string)
+   |
+  (+)
+  / \
+(1) (2)</code></pre>
+<p>The type checker walks that tree from the bottom to top. Something like this:</p>
+<p>1.  Get the type of <code>1</code> (<code>Int</code>).</p>
+<p>2.  Get the type of <code>2</code> (<code>Int</code>).</p>
+<p>3.  Look up the type of <code>+</code> on the receiver&#x27;s type (<code>Int</code>, from <em>1</em>).</p>
+<p>4.  See if the parameter type for <code>+</code> (<code>Int</code>, from the declaration of <code>+</code>)     matches the argument type (<code>Int</code>, from <em>2</em>). (It does.)</p>
+<p>5.  Get the return type of that method (<code>Int</code>).</p>
+<p>6.  Look up the type of <code>string</code> on the receiver&#x27;s type (<code>Int</code>, from <em>5</em>).</p>
+<p>7.  Get the return type of that method (<code>String</code>).</p>
+<p>8.  Look up the type of <code>print</code>.</p>
+<p>9.  See if the parameter type for <code>print</code> (<code>String</code>, from its declaration)     matches the argument type (<code>String</code>, from <em>7</em>). (It does.)</p>
+<p>And we&#x27;re done. Steps 3 6, and 8 are where we do <code>getMemberType()</code>. Steps 4 and 9 are where we use <code>canAssignFrom()</code>. Nothing too crazy. In Magpie, this is basically [one file][</p>
+<p>].</p>
+<p>[one file]: https://github.com/munificent/magpie/blob/b37c7265c689fb150c6463c9538284610dba1a01/src/com/stuffwithstuff/magpie/interpreter/ExprChecker.java</p>
+<h2>Re-piercing the veil</h2>
+<p>Here&#x27;s where it gets weird. We need to get this working with first-class types. That means that <code>getMemberType</code> and <code>canAssignFrom</code> will be methods written in Magpie.</p>
+<p>To do this, the type checker will do something unusual. In the middle of <em>statically</em> checking a chunk of code, it will periodically switch to <em>dynamically</em> evaluating some Magpie code. Whenever it needs to compare two types or look up a method, it hands off to the interpreter which calls the appropriate method and and passes the result back to the type checker.</p>
+<p>This is slightly less crazy than it seems because the code being dynamically evaluated (methods on the type objects) is generally not the code being type- checked (any random piece of Magpie code like <code>1 + 2</code>). Keeping track of which context the interpreter is in is a little bit confusing, but it works.</p>
+<h2>Bootstrapping</h2>
+<p>Magpie has worked this way successfully for several months. This is possible because at its core, Magpie is dynamic -- it can execute a chunk of Magpie code without having done any compilation or type checking on it. So I could write the classes that defined the type system in Magpie without using any type annotations and they&#x27;d run happily along like any dynamic language.</p>
+<p>It worked that way, with the type system itself being dynamically typed until I had enough type system features in place to actually be able to express all of the types I needed.</p>
+<p>In the last week or so, I finally reached that point. The most important part was interfaces. I needed the ability to define an interface for <code>Type</code> that the different type classes (<code>ArrayType</code>, <code>Class</code>, <code>Tuple</code>, etc.) could implement. Interface types are defined entirely within Magpie -- there isn&#x27;t a single line of Java code related to them.</p>
+<p>Once I had that working, I could use that to define a <code>Type</code> interface (an instance of the Magpie class <code>Interface</code>). Then I could turn around and use that type to annotate the types of the different methods that the type system requires. Where before, methods like <code>canAssignFrom(other)</code> were dynamically typed, now I could do <code>canAssignFrom(other Type)</code>.</p>
+<p>The end result was, by far, the most mind-crushingly meta thing I&#x27;ve ever had to wade through. Behold:</p>
+<pre class="magpie"><code>interface Type
+  canAssignFrom(other Type -&gt; Bool)
+  getMemberType(name String -&gt; Type | Nothing)
+  // Some other stuff...
+end</code></pre>
+<p>That chunk of Magpie code defines an interface <code>Type</code> that the type classes in Magpie must implement. You&#x27;ll note that it&#x27;s recursive -- most of its methods take arguments of type <code>Type</code>.</p>
+<p>Every class that defines a type in Magpie implements that. Interfaces are a type, so [<code>Interface</code>][interface</p>
+<p>] implements <code>Type</code>, of course:</p>
+<p>[interface]: https://github.com/munificent/magpie/blob/b37c7265c689fb150c6463c9538284610dba1a01/base/Interface.mag</p>
+<pre class="magpie"><code>class Interface
+  canAssignFrom(other Type -&gt; Bool)
+    // Check that other type has every member of this one.
+    for member = members do
+      var type = member memberType()
+      let otherMem = other getMemberType(member name) then
+        // Must be assignable.
+        if type canAssignFrom(otherMem) not then return false
+        end
+      else return false // Must have members.
+    end
+
+    // If we got here, every method was found and matched.
+    true
+  end
+
+  getMemberType(name String -&gt; Type | Nothing)
+    let member = members first(
+          fn (m Member -&gt; Bool) m name == name) then
+      member memberType()
+    end
+  end
+
+  // Other stuff...
+end</code></pre>
+<p>So we have a Magpie class, <code>Interface</code> that implements an interface, <code>Type</code>, that is in turn an instance of that same <code>Interface</code> class.</p>
+<p>Now that all of the methods in the classes defining the type system have type annotations, this means the type checker will check them too. So when a Magpie program is type checked, it also type checks the type system itself.</p>
+<h2>One less language</h2>
+<p>With all types being actual live Magpie objects, that raises an odd question: What is a type annotation? In most languages, there are actually two languages mixed together: the language of expressions and the language of types. So, in Java, there are value expressions like <code>1 + 2</code> but also type expressions like <code>List&lt;Int&gt;</code>, and these are two totally separate languages.</p>
+<p>But in Magpie, even type expressions need to yield Magpie objects, so there is no meaningful distinction between expressions and type annotations. Type annotations are just regular Magpie expressions, evaluated dynamically during type checking. If you have a function like:</p>
+<pre class="magpie"><code>parseNumber(value String -&gt; Int | Nothing)
+    // ...
+end</code></pre>
+<p>That <code>String</code> is just a regular Magpie expression, as is <code>Int | Nothing</code>. In the case of the latter, <code>|</code> is just an operator on the <code>Class</code> class.</p>
+<p>This means that not only is Magpie&#x27;s type system extensible, even its type <em>annotations</em> are. If you wanted to, you could define new operators or functions and use them in type annotations:</p>
+<pre class="magpie"><code>what(arg doSomething(Very * Strange))</code></pre>
+<p>I honestly don&#x27;t know if that&#x27;s a useful feature, but I do like the idea of not having the type system welded into the language. If you like prototypes, or algebraic data types, wouldn&#x27;t it be nice if you could add them to the language yourself? Or maybe that&#x27;s just crazy talk.</p>
+<h2>Why?</h2>
+<p>You may be asking why the hell I went so far down the rabbit hole here. I didn&#x27;t intend to, honest. I really don&#x27;t want Magpie to be some weird esoteric language. All I wanted was:</p>
+<p>1.  The ability to imperatively modify classes like you can in Python and Ruby.</p>
+<p>2.  Static type checking (after that imperative modification has happened).</p>
+<p>This just seemed like the most straightforward way to pull that off, but if you got any better ideas, I&#x27;m all ears. </p>

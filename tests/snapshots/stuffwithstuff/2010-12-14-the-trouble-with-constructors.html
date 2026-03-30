@@ -1,0 +1,132 @@
+<p>Every fledgling programming language exists somewhere on the continuum between &quot;scratchings in a notebook&quot; and &quot;making Java nervous&quot;. Right now, Magpie is farther to the right than total vaporware, but it&#x27;s not yet at the point where I actually want people to use it (though you&#x27;re certainly [welcome to try][magpie</p>
+<p>]). The big reason for that is that there&#x27;s some core pieces I&#x27;m still figuring out. Without those in place, any attempts to use the language will either fail or just be invalidated when I change something.</p>
+<p>[magpie]: https://magpie-lang.org/</p>
+<p>The biggest piece of that is the object system -- how classes work. The two challenging parts of <em>that</em> are inheritance and constructors. I think I&#x27;ve got a few ideas that are finally starting to stick there, so I thought I&#x27;d start documenting them to make sure I&#x27;ve got it clear in my head, and hopefully get some feedback.</p>
+<p>In this post, I&#x27;ll just worry about constructors. The way Magpie handles constructing instances of classes is a bit... uh... odd. I&#x27;ll explain [Memento][</p>
+<p>]-style, starting with the end and working backwards to see how I got there. By the end (or is it the beginning?) it should hopefully make sense.</p>
+<p>[memento]: http://www.imdb.com/title/tt0209144/</p>
+<h2>Making an object</h2>
+<p>To see where we end up, here&#x27;s a simple class in Magpie:</p>
+<pre class="magpie"><code>class Point
+  var x Int
+  var y Int
+end</code></pre>
+<p>Pretty basic. It has two fields. Because those fields don&#x27;t have initializers (i.e. they aren&#x27;t like <code>var z = 123</code>), they need to get those values passed in. Given that class up there, you can do that and make an instance like this:</p>
+<pre class="magpie"><code>var point = Point new(x: 1 y: 2)</code></pre>
+<p>That doesn&#x27;t look very special. It looks like <code>new</code> is just a static method on the class, and you pass in named arguments? That&#x27;s half right. <code>new</code> <em>is</em> just a static (&quot;shared&quot; in Magpie-ese) method. Magpie doesn&#x27;t have named arguments. What it has are <em>records</em>. The above is identical to:</p>
+<pre class="magpie"><code>var coords = x: 1 y: 2
+var point = Point new(coords)</code></pre>
+<p>Records in Magpie are as they are in ML: [structurally typed][</p>
+<p>] anonymous structs. A series of <code>keyword: value</code> pairs forms a single expression that evaluates to a record value. Sort of like object literals in Javascript, although they&#x27;re statically typed in Magpie.</p>
+<p>[structurally typed]: http://en.wikipedia.org/wiki/Structural_type_system</p>
+<p>So, this is pretty straightforward. When you define a class, it automatically gets a shared method called <code>new</code> that expects a record with fields that match all of the required fields of the class?</p>
+<p>Well, sort of. Actually, the <code>new</code> method doesn&#x27;t do much at all. It&#x27;s defined as simply:</p>
+<pre class="magpie"><code>def new(arg) construct(arg)</code></pre>
+<p>OK, so what&#x27;s <code>construct</code>?</p>
+<h2>Raw constructors</h2>
+<p>Raw constructors are the real way that instances of a named class are created in Magpie. Each class automatically gets a shared <code>construct</code> method. That method (like <code>new</code>) takes a record with fields for all of the fields of the class. It then builds an instance of the class and copies those field values over.</p>
+<p>So raw constructors are the real way that instances of a class are allocated in Magpie. So what is <code>new</code> for then?</p>
+<h2>A time to initialize</h2>
+<p>Calling <code>construct</code> is the primitive way to create an instance, but many (most?) classes need to perform some initialization when an instance is created. Or maybe they&#x27;ll calculate the values of some of the fields instead of just taking them in as arguments. <code>new</code> exists to give you a place to do that.</p>
+<p>For example, let&#x27;s say we actually wanted to create points using polar coordinates, even though it stores them as Cartesian. In that case, we could define <code>new</code> like:</p>
+<pre class="magpie"><code>class Point
+  shared def new(theta Int, radius Int -&gt; Point)
+    var x = cos(theta) * radius
+    var y = sin(theta) * radius
+    construct(x: x y: y)
+  end
+
+  var x Int
+  var y Int
+end</code></pre>
+<p>As you can see <code>new</code> is basically a factory method. It does some calculation, and then the very last thing it does is call <code>construct</code>, the <em>real</em> way to create an object, and returns the result. (Like Ruby, a function implicitly returns the result of its last expression.)</p>
+<p>The reason Magpie always gives you <em>both</em> <code>construct</code> and <code>new</code> is for [forward-compatibility][</p>
+<p>]. <code>new</code> is the way users typically create instances, so Magpie gives you a default one that forwards to <code>construct</code>. If you later realize you need to do more initialization than just a straight call to <code>construct</code>, you can replace <code>new</code> without having to change every place you&#x27;re creating an object.</p>
+<p>[forward-compatibility]: /2010/09/18/futureproofing-uniform-access-and-masquerades/</p>
+<h2>OK, but why?</h2>
+<p>That seems pretty strange. Why on Earth would I design things this way instead of just using normal constructors like most other languages?</p>
+<p>Let&#x27;s imagine that Magpie <em>did</em> have normal constructors (which it did until a few days ago, actually). Let&#x27;s translate our Point class to use that:</p>
+<pre class="magpie"><code>class Point
+  // &#x27;this&#x27; here defines a constructor method
+  this(x Int, y Int)
+    this x = x
+    this y = y
+  end
+
+  var x Int
+  var y Int
+end</code></pre>
+<p>Pretty straightforward, and it works fine. Now, let&#x27;s break it:</p>
+<pre class="magpie"><code>class Point
+  this(x Int, y Int)
+    this x = x
+  end
+
+  var x Int
+  var y Int
+end</code></pre>
+<p>Here, we failed to initialize the <code>y</code> field. What is its value? We can fix that the way Java does with <code>final</code> fields by statically checking for [definite assignment][</p>
+<p>]. Part of the type checking process will be to walk through the constructor function and make sure every declared field in the class gets assigned to. This isn&#x27;t rocket science, and I went ahead and [implemented that][impl</p>
+<p>] in Magpie too.</p>
+<p>[definite assignment]: http://java.sun.com/docs/books/jls/first*edition/html/16.doc.html [impl</p>
+<p>]: https://github.com/munificent/magpie/blob/e79021536467a03ca6973822ea7963b317c5dacf/src/com/stuffwithstuff/magpie/interpreter/DefiniteFieldAssignment.java</p>
+<p>So we&#x27;re good, right? Well, what about this:</p>
+<pre class="magpie"><code>class Point
+  this(x Int, y Int)
+    doSomethingWithAPoint(this)
+    this x = x
+    this y = y
+  end
+
+  var x Int
+  var y Int
+end</code></pre>
+<p>In the constructor, we&#x27;re passing <code>this</code> to another function. That function, reasonably enough, expects the Point it receives to be fully initialized, but at this point it isn&#x27;t. So that&#x27;s bad.</p>
+<p>We can fix that by making the static analysis even more comprehensive. While we check for definite assignment, we&#x27;ll also track and make sure that <code>this</code> isn&#x27;t used until all fields are definitely assigned.</p>
+<p>Of course, you need to be able to use <code>this</code> to actually assign the fields. So we&#x27;ll need to special-case that. At this point, it starts to look like we&#x27;re building some ad-hoc [typestate][</p>
+<p>] system where the static &quot;type&quot; of <code>this</code> mutates as we walk through the body of the constructor and gets tagged with all of the fields that have been assigned to it. Like:</p>
+<p>[typestate]: https://en.wikipedia.org/wiki/Typestate_analysis</p>
+<pre class="magpie"><code>this(x Int, y Int)
+  // Here &#x27;this&#x27; is &quot;Point with no fields assigned&quot;.
+  this x = x
+  // Now it&#x27;s &quot;Point with x&quot;.
+  this y = y
+  // Now it&#x27;s &quot;Point with x and y&quot; and we&#x27;re good.
+end</code></pre>
+<p>This is doable, but it&#x27;s a bit of a chore to implement. Much worse is that it&#x27;s a real chore for any (purely hypothetical at this point) Magpie user to have to know. In order to understand the weird type errors you can get in a constructor, you have to fully understand all of this flow analysis I just described.</p>
+<p>I&#x27;m trying to keep Magpie as simple as I can, and this is definitely not it.</p>
+<h2>Why don&#x27;t other languages have this problem?</h2>
+<p>Here is where we get to the real motivation that leads to all of this. Java and C# don&#x27;t have this issue with their constructors. It&#x27;s perfectly valid to do this in Java:</p>
+<pre class="java"><code>class Point {
+  public Point(int x, int y) {
+    doSomethingWithPoint(x, y);
+    this.x = x;
+    this.y = y;
+  }
+
+  private final int x;
+  private final int y;
+}</code></pre>
+<p>It&#x27;s bad form, but it&#x27;s safe. The reason why is because Java has <em>default initialization</em>. Before you ever assign to a field in Java, it still has a well-defined value. Numbers are 0, Booleans are false, and reference types are <code>null</code>.</p>
+<p>Whoops! That last one is a [doozy][</p>
+<p>]. I <em>hate</em> having to check for <code>null</code> at runtime. One of the major motivations for designing Magpie was to have it [statically eliminate][null</p>
+<p>] the need for those. If I say a variable is of type Monkey, I want it to always be a <em>monkey</em>, not &quot;possibly a monkey, but also possibly this other magical missing monkey value&quot;.</p>
+<p>[doozy]: http://lambda-the-ultimate.org/node/3186 [null</p>
+<p>]: /2010/08/23/void-null-maybe-and-nothing/</p>
+<p>The problem then is that it isn&#x27;t always possible to create a value of some arbitrary type <em>ex nihilo</em>. We can&#x27;t just default initialize a field of Monkey by creating a new monkey from scratch. Maybe it needs arguments to be constructed.</p>
+<p>So default initialization has to go. Every field in an instance of a class will need to be explicitly initialized before anyone can use that instance. In other words, until its fully set-up, <code>this</code> is verboten.</p>
+<p>(C++ has its own solution for this, of course: constructor initialization lists. They solve this problem neatly, but at the expense of adding a non-trivial amount of complexity to the language.)</p>
+<p>The most straightforward solution I could come up with was this: <em>create the instance as a single atomic operation</em>. To do this, we need to pass in <em>all</em> of the fields the instance needs, and it will return us a fully-initialized ready-to-use object. That&#x27;s <code>construct</code>.</p>
+<p>What&#x27;s nice about this approach is that it&#x27;s dead simple. There&#x27;s almost no special support in Magpie for constructors. No syntax for defining them. No special definite assignment for tracking that fields are initialized. Just a single built-in <code>construct</code> method auto-generated by the interpreter for each class, and you&#x27;re good to go.</p>
+<p>It&#x27;s not all rosy, though. Doing things this way can be kind of gross if your class has a lot of fields to initialize. You end up having to build a big record as the last expression in your <code>new</code> method.</p>
+<p>The other challenge is that circular immutable data structures aren&#x27;t really feasible. (Magpie doesn&#x27;t have immutable fields yet, but it will.) Haskell has it even worse than Magpie since <em>everything</em> is immutable and it&#x27;s actually [surprisingly tricky][knot</p>
+<p>] to solve it.</p>
+<p>[knot]: http://www.haskell.org/haskellwiki/Tying_the_Knot</p>
+<p>What may be the biggest drawback, though, is that it&#x27;s unusual. Unfamiliarity is its own steep cost, especially in a fledgling language.</p>
+<h2>Rewind</h2>
+<p>So, going from cause to effect, it&#x27;s:</p>
+<p>1.  To get rid of null references, I had to get rid of default initialization.</p>
+<p>2.  To get rid of default initialization, I had to get rid of access to <code>this</code>     before an object has been fully-constructed.</p>
+<p>3.  To do that, I turned construction into a single <code>construct</code> method that     takes all of the required state and returns a new instance all in one step.</p>
+<p>4.  Then, to get user-defined initialization back, I wrapped that in a <code>new</code>     method that you can swap out to do what you want.</p>
+<p>The reasoning seemed pretty sound to me, but I&#x27;m always eager to hear what others think about it. </p>

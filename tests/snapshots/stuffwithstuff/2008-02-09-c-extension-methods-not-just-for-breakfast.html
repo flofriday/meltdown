@@ -1,0 +1,148 @@
+<p>When I first started reading about C# 3.0, one of the new features that caught my eye was extension methods. I really like <code>foo.Bar()</code> syntax because with auto-complete it helps users find out what methods are available for a class. With extension methods, I could add new behavior to other classes and still keep that calling convention. Yay.</p>
+<p>But after thinking about it for a while, I realized there&#x27;s some interesting capabilities that this simple feature provides. While at one level, extension methods are just [syntactic sugar][</p>
+<p>], I think they open up the possibility for some deeper architecture implications.</p>
+<p>[syntactic sugar]: http://weblog.raganwald.com/2007/04/writing-programs-for-people-to-read.html</p>
+<h2>The normal thing</h2>
+<p>Before I go off the deep end, let&#x27;s make sure we&#x27;re all together. Here&#x27;s the canonical use case for extension methods. Let&#x27;s say you have some class created by an external developer (read &quot;Microsoft&quot;). We&#x27;ll pick String because [everyone][string-1</p>
+<p>] [else][string-2</p>
+<p>] [does][string-3</p>
+<p>]. Let&#x27;s say you want a method to tell if a string contains only letters. Here&#x27;s how you&#x27;d normally do it:</p>
+<p>[string-1]: http://weblogs.asp.net/scottgu/archive/2007/03/13/new-orcas-language-feature-extension-methods.aspx [string-2</p>
+<p>]: http://www.developer.com/net/csharp/article.php/3592216 [string-3]: http://msdn2.microsoft.com/en-us/library/bb383977.aspx</p>
+<pre class="csharp"><code>public static class StringUtils
+{
+    public static bool IsAlpha(string text)
+    {
+        foreach (char c in text.ToLower())
+        {
+            if (!Char.IsLetter(c)) return false;
+        }
+        return true;
+    }
+}</code></pre>
+<p>That works, but the calling convention is kind of lame:</p>
+<pre class="csharp"><code>bool isAlpha = StringUtils.IsAlpha(someString);</code></pre>
+<p>Not only is it backwards from normal &quot;noun.verb&quot; OOP syntax, it&#x27;s got this useless &quot;<code>StringUtils</code>&quot; in there. Worse, your users have to <em>know</em> that <code>StringUtils</code> even exists before they can find the method. <code>IsAlpha</code> is no longer an easily discoverable property of all strings. So here&#x27;s the fancy C# 3.0 way using an extension method:</p>
+<pre class="csharp"><code>public static class StringUtils
+{
+    public static bool IsAlpha(this string text)
+    {
+        string letters = &quot;abcdefghijklmnopqrstuvwxyz&quot;;
+        foreach (char c in text.ToLower())
+        {
+            if (!letters.Contains(c)) return false;
+        }
+        return true;
+    }
+}</code></pre>
+<p>Not much different right? Just add a little <code>this</code> in the declaration. The difference is in the calling convention:</p>
+<pre class="csharp"><code>bool isAlpha = someString.IsAlpha();</code></pre>
+<p>Much better. So this is about as far as I think most people get with them. &quot;Extension method&quot; = &quot;friendlier calling convention&quot;. Now, let&#x27;s see if there are any other rabbits we can pull out of this hat.</p>
+<h2>Reuse methods without inheritance</h2>
+<p>Ever wish you could reuse a method across five different classes that don&#x27;t share a base class? In most cases, that usually means some seriously extensive refactoring. In many cases, it isn&#x27;t even <em>possible</em> with single inheritance. Maybe your classes already have distinct base classes for good reasons.</p>
+<p>Here&#x27;s what I&#x27;m talkin&#x27; about. Let&#x27;s say you&#x27;re writing a game and you&#x27;ve got something like this:</p>
+<pre class="csharp"><code>public interface IPosition
+{
+    float X { get; }
+    float Y { get; }
+}
+
+public class Monster: Actor, IPosition { /* implementation... */ }
+public class Treasure: Item, IPosition { /* implementation... */ }</code></pre>
+<p>Often, you want to look through a collection of these to find the first one at a given position. The normal solution is to just derive your own collection and implement it there:</p>
+<pre class="csharp"><code>public class MonsterCollection : List&lt;Monster&gt;
+{
+    public Monster GetAt(IPosition pos) { /* ... */ }
+}</code></pre>
+<p>The problem is you&#x27;ve now got to derive a new collection for every class with a position and copy <code>GetAt()</code> in every one. Sure, you could do an abstract collection for a collection of things with positions but that doesn&#x27;t cover different <em>kinds</em> of collections. What if you need lists and queues and stacks of monsters?</p>
+<p>Extension methods to the rescue! You can define extension methods <em>on interfaces</em>. In fact, you can even define them on <em>generic</em> interfaces. Like <code>IEnumerable&lt;T&gt;</code>. Ooh!</p>
+<pre class="csharp"><code>public static class IPositionExtensions
+{
+    public static T GetAt&lt;T&gt;(this IEnumerable&lt;T&gt; col,
+        float x, float y) where T : IPosition
+    {
+        foreach (T item in col)
+        {
+            if ((item.X == x) &amp;&amp; (item.Y == y)) return item;
+        }
+        return default(T);
+    }
+}</code></pre>
+<p>Now you can do:</p>
+<pre class="csharp"><code>List&lt;Monster&gt; monsters = new List&lt;Monster&gt;();
+monsters.GetAt(1.0f, 2.0f);</code></pre>
+<p>Along with:</p>
+<pre class="csharp"><code>Stack&lt;Treasure&gt; treasures = new Stack&lt;Treasure&gt;();
+treasures.GetAt(1.0f, 2.0f);</code></pre>
+<p>Heck, even:</p>
+<pre class="csharp"><code>Dictionary&lt;string, Monster&gt; monsters =
+    new Dictionary&lt;string, Monster&gt;();
+monsters.Values.GetAt(1.0f, 2.0f);</code></pre>
+<p>This means <strong>you can define methods that say, &quot;if this class provides this capability, then it also has this capability&quot;</strong>. Whoawesome!</p>
+<h2>Make Scott Meyers happy</h2>
+<p>One of the guidelines in [long-haired viking Scott Meyers&#x27;][meyers</p>
+<p>] legendary tome [Effective C++][</p>
+<p>] is &quot;[prefer non-friend non-member functions to member functions][non-member</p>
+<p>]. You could translate that in C# to, &quot;prefer static methods of a helper class to instance methods&quot;.</p>
+<p>[meyers]: http://www.aristeia.com/ [effective c++</p>
+<p>]: http://www.amazon.com/dp/0201924889 [non-member]: http://www.aristeia.com/effective-c++_frames.html</p>
+<p>His reasoning is sound. Most people agree that the more you can hide information (i.e. prevent access to private members), the stronger and less coupled your code. His guideline just extends that to methods of a class: If you can implement a method just using other public methods of a class, why give it access to the private members at all? Why not decouple even parts of the class from itself?</p>
+<p>At the concept level, it&#x27;s good advice, until you run into some issues:</p>
+<p>1.  You&#x27;ve just <strong>changed the user&#x27;s calling convention because of an     implementation detail</strong>. The fact that you can implement a method just using     the public interface of the class is a facet of its <em>implementation</em>, just     the kind of detail that encapsulation is supposed to <em>hide</em>. But now the     user is forced to deal with that distinction because sometimes they call (in     C#):</p>
+<p>    <code></code>`csharp     foo.Bar(); // needs access to private members     <code></code>`</p>
+<p>    and sometimes it&#x27;s:</p>
+<p>    <code></code>`csharp     FooHelper.Bar(foo); // doesn&#x27;t need access to private members     <code></code>`</p>
+<p>2.  You also <strong>threw away discoverability</strong>. Users expect to find the     capabilities of an object through the instance methods of that object. You     can save a lot of time reading MSDN by just typing <code>foo.</code> and seeing what it     lets you do. Shunting stuff over in a separate class means users need to     know about it and seek it out.</p>
+<p>3.  Also, you just <strong>pitched out some extensibility</strong>. The fact that you can     implement a method as a non-instance member <em>now</em> doesn&#x27;t mean you <em>always     will</em> be able to. If you decide that <code>FooHelper.Bar()</code> really does need to     use that private cache inside <code>Foo</code> for performance, too bad. You either     have to make your helper class a friend (kinda defeats the purpose) or     worse, force all of your users to change their code.</p>
+<p>By now, you&#x27;ve probably noticed that extension methods neatly address all of those issues, while still providing the same benefits. Simply change <code>FooHelper.Bar(foo)</code> to an extension method. Now the calling convention is the same as an instance method (point #1), the IDE will show it in auto-complete (#2), and since the calling convention is the same, you could move <code>Bar()</code> from <code>FooHelper</code> into <code>Foo</code> later if you needed without having to change any calling code (#3). Score!</p>
+<h2>Separate your concerns</h2>
+<p>So while the points above were running through my head in a kind of &quot;Oh, here&#x27;s an interesting abstract programming thing&quot; way, I was dealing with a much more tangible real problem with some projects I was working on: separating back-end code from UI code. (Or [MVC][</p>
+<p>], or &quot;[separating presentation and content][sep</p>
+<p>]&quot;, or &quot;[separation of concerns][</p>
+<p>]&quot;, or whatever buzzphrase you prefer.) Any engineer worth their [salt] gets this concept. Smearing UI logic, or printing, or serialization, or <em>whatever</em> throughout the rest of your code is dumb.</p>
+<p>[mvc]: http://en.wikipedia.org/wiki/Model-view-controller [sep</p>
+<p>]: http://en.wikipedia.org/wiki/Separation_of_presentation_and_content [separation of concerns]: http://en.wikipedia.org/wiki/Separation_of_concerns [salt</p>
+<p>]: http://en.wikipedia.org/wiki/Salt_%28cryptography%29</p>
+<p>For example, let&#x27;s say we have a monster. (Who wouldn&#x27;t want a pet monster?)</p>
+<pre class="csharp"><code>namespace Engine
+{
+    public class Monster
+    {
+        public float X;
+        public float Y;
+        public string Type;
+
+        public void ProcessAI()
+        {
+            // stuff...
+        }
+    }
+}</code></pre>
+<p>This class defines what a monster <em>is</em> in the abstract data sense. We want to isolate it from anything specific to UI or rendering because while <em>right now</em> the UI is kicking [old school][rephial</p>
+<p>] [ASCII][</p>
+<p>], it may get graphics in the future. That change shouldn&#x27;t affect the engine one bit.</p>
+<p>[rephial]: http://www.rephial.org [ascii</p>
+<p>]: http://angband.oook.cz/screen-show.php?id=1358</p>
+<p>But our uber-modern ASCII UI needs to know what character to use to draw a given monster. Ideally:</p>
+<pre class="csharp"><code>public void Draw(Monster monster)
+{
+    Console.WriteLine(monster.Character);
+}</code></pre>
+<p>We can solve our separation problem like this:</p>
+<pre class="csharp"><code>namespace UI
+{
+    public static class MonsterExtensions
+    {
+        public static char GetCharacter(this Monster monster)
+        {
+            if (type == &quot;orc&quot;) return &#x27;o&#x27;;
+            if (type == &quot;kobold&quot;) return &#x27;k&#x27;;
+            if (type == &quot;dragon&quot;) return &#x27;d&#x27;;
+            return &#x27;?&#x27;;
+        }
+    }
+}</code></pre>
+<p>Now code that is using the UI namespace sees <code>GetCharacter()</code> as an intrinsic capability of monsters, but code that only uses the engine doesn&#x27;t. And since we can define <code>GetCharacter()</code> in a separate assembly, we can <em>totally</em> separate it from the engine even while keeping the usability of having it <em>seem</em> to be part of <code>Monster</code>.</p>
+<p>You can apply this to almost all of the concerns of a class, provided the concern doesn&#x27;t require its own data. If you take this is far as you can, you end up with a core class whose job is to hold state and ensure that it&#x27;s internally consistent. Then the various capabilities of the object: display, serialization, printing, etc. can be implemented as distinct sets of extension methods on it, defined in separate assemblies.</p>
+<h2>Limitations</h2>
+<p>I&#x27;m pretty excited about extension methods, but they aren&#x27;t without their limitations. The two big ones are that C# doesn&#x27;t support extension properties (boo), and that obviously extension methods can&#x27;t add fields to a class. But if all you&#x27;re trying to do is add new behavior I think extension methods are a cool way to do it while keeping things as decoupled as possible. </p>
