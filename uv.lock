@@ -273,6 +273,7 @@ source = { editable = "." }
 [package.dev-dependencies]
 dev = [
     { name = "inline-snapshot" },
+    { name = "pygments" },
     { name = "pytest" },
     { name = "ruff" },
     { name = "twine" },
@@ -284,6 +285,7 @@ dev = [
 [package.metadata.requires-dev]
 dev = [
     { name = "inline-snapshot", specifier = ">=0.32.5" },
+    { name = "pygments", specifier = ">=2.19.2" },
     { name = "pytest", specifier = ">=9.0.2" },
     { name = "ruff", specifier = ">=0.12.11" },
     { name = "twine", specifier = ">=6.1.0" },

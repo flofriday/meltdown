@@ -69,6 +69,20 @@ class CustomHtmlRenderer(HtmlRenderer):
         return output
 ```
 
+### Custom renderer with pygments
+
+With pygments you can also statically render the code blocks with highlighting:
+
+```python
+formatter = HtmlFormatter(style="monokai", cssclas="highlight")
+
+class CustomHtmlRenderer(HtmlRenderer):
+    def visit_code_block(self: Self, node: CodeBlockNode) -> str:
+        language = node.language if node.language else "plain"
+        return highlight(
+            node.code, get_lexer_by_name(language, stripall=True), formatter
+        )
+```
 
 ## Development
 

@@ -58,7 +58,7 @@ def test_extend_for_highlightjs():
     ).render(CustomHtmlRenderer())
     standalone = dedent(f"""
         <html>
-        <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.11.1/styles/default.min.css">
+        <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.11.1/styles/monokai.min.css">
         <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.11.1/highlight.min.js"></script>
         <body>
         {inner}
@@ -67,3 +67,42 @@ def test_extend_for_highlightjs():
         </html>
         """)
     assert standalone == external_file("snapshots/highlightjs.html")
+
+
+def test_extend_with_pygemnts():
+    from pygments import highlight
+    from pygments.formatters import HtmlFormatter
+    from pygments.lexers import get_lexer_by_name
+
+    formatter = HtmlFormatter(style="monokai", cssclas="highlight")
+
+    class CustomHtmlRenderer(HtmlRenderer):
+        def visit_code_block(self: Self, node: CodeBlockNode) -> str:
+            language = node.language if node.language else "plain"
+            return highlight(
+                node.code, get_lexer_by_name(language, stripall=True), formatter
+            )
+
+    inner = parse(
+        dedent("""
+            # Code Examples with pygments
+            look at this example here:
+
+            ```python
+            def fib(n: int) -> int:
+                return fib(n-1) + fib(n-2)
+            ```
+        """)
+    ).render(CustomHtmlRenderer())
+
+    standalone = dedent(f"""
+        <html>
+        <style>
+        {formatter.get_style_defs(".highlight")}
+        </style>
+        <body>
+        {inner}
+        </body>
+        </html>
+        """)
+    assert standalone == external_file("snapshots/pygments.html")
