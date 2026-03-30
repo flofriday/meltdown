@@ -1,0 +1,325 @@
+<blockquote> Grammar, which knows how to control even kings.</blockquote><blockquote> &lt;cite&gt;Molière&lt;/cite&gt;</blockquote><p>&lt;span name=&quot;parse&quot;&gt;This&lt;/span&gt; chapter marks the first major milestone of the book. Many of us have cobbled together a mishmash of regular expressions and substring operations to extract some sense out of a pile of text. The code was probably riddled with bugs and a beast to maintain. Writing a <em>real</em> parser -- one with decent error handling, a coherent internal structure, and the ability to robustly chew through a sophisticated syntax -- is considered a rare, impressive skill. In this chapter, you will &lt;span name=&quot;attain&quot;&gt;attain&lt;/span&gt; it.</p>
+<p>&lt;aside name=&quot;parse&quot;&gt;</p>
+<p>&quot;Parse&quot; comes to English from the Old French &quot;pars&quot; for &quot;part of speech&quot;. It means to take a text and map each word to the grammar of the language. We use it here in the same sense, except that our language is a little more modern than Old French.</p>
+<p>&lt;/aside&gt;</p>
+<p>&lt;aside name=&quot;attain&quot;&gt;</p>
+<p>Like many rites of passage, you&#x27;ll probably find it looks a little smaller, a little less daunting when it&#x27;s behind you than when it loomed ahead.</p>
+<p>&lt;/aside&gt;</p>
+<p>It&#x27;s easier than you think, partially because we front-loaded a lot of the hard work in the [last chapter][</p>
+<p>]. You already know your way around a formal grammar. You&#x27;re familiar with syntax trees, and we have some Java classes to represent them. The only remaining piece is parsing -- transmogrifying a sequence of tokens into one of those syntax trees.</p>
+<p>[last chapter]: representing-code.html</p>
+<p>Some CS textbooks make a big deal out of parsers. In the &#x27;60s, computer scientists -- understandably tired of programming in assembly language -- started designing more sophisticated, &lt;span name=&quot;human&quot;&gt;human&lt;/span&gt;-friendly languages like Fortran and ALGOL. Alas, they weren&#x27;t very <em>machine</em>-friendly for the primitive computers of the time.</p>
+<p>&lt;aside name=&quot;human&quot;&gt;</p>
+<p>Imagine how harrowing assembly programming on those old machines must have been that they considered <em>Fortran</em> to be an improvement.</p>
+<p>&lt;/aside&gt;</p>
+<p>These pioneers designed languages that they honestly weren&#x27;t even sure how to write compilers for, and then did groundbreaking work inventing parsing and compiling techniques that could handle these new, big languages on those old, tiny machines.</p>
+<p>Classic compiler books read like fawning hagiographies of these heroes and their tools. The cover of <em>Compilers: Principles, Techniques, and Tools</em> literally has a dragon labeled &quot;complexity of compiler design&quot; being slain by a knight bearing a sword and shield branded &quot;LALR parser generator&quot; and &quot;syntax directed translation&quot;. They laid it on thick.</p>
+<p>A little self-congratulation is well-deserved, but the truth is you don&#x27;t need to know most of that stuff to bang out a high quality parser for a modern machine. As always, I encourage you to broaden your education and take it in later, but this book omits the trophy case.</p>
+<h2>Ambiguity and the Parsing Game</h2>
+<p>In the last chapter, I said you can &quot;play&quot; a context-free grammar like a game in order to <em>generate</em> strings. Parsers play that game in reverse. Given a string -- a series of tokens -- we map those tokens to terminals in the grammar to figure out which rules could have generated that string.</p>
+<p>The &quot;could have&quot; part is interesting. It&#x27;s entirely possible to create a grammar that is <em>ambiguous</em>, where different choices of productions can lead to the same string. When you&#x27;re using the grammar to <em>generate</em> strings, that doesn&#x27;t matter much. Once you have the string, who cares how you got to it?</p>
+<p>When parsing, ambiguity means the parser may misunderstand the user&#x27;s code. As we parse, we aren&#x27;t just determining if the string is valid Lox code, we&#x27;re also tracking which rules match which parts of it so that we know what part of the language each token belongs to. Here&#x27;s the Lox expression grammar we put together in the last chapter:</p>
+<pre class="ebnf"><code>expression     → literal
+               | unary
+               | binary
+               | grouping ;
+
+literal        → NUMBER | STRING | &quot;true&quot; | &quot;false&quot; | &quot;nil&quot; ;
+grouping       → &quot;(&quot; expression &quot;)&quot; ;
+unary          → ( &quot;-&quot; | &quot;!&quot; ) expression ;
+binary         → expression operator expression ;
+operator       → &quot;==&quot; | &quot;!=&quot; | &quot;&lt;&quot; | &quot;&lt;=&quot; | &quot;&gt;&quot; | &quot;&gt;=&quot;
+               | &quot;+&quot;  | &quot;-&quot;  | &quot;*&quot; | &quot;/&quot; ;</code></pre>
+<p>This is a valid string in that grammar:</p>
+<p>&lt;img src=&quot;image/parsing-expressions/tokens.png&quot; alt=&quot;6 / 3 - 1&quot; /&gt;</p>
+<p>But there are two ways we could have generated it. One way is:</p>
+<p>1. Starting at <code>expression</code>, pick <code>binary</code>. 2. For the left-hand <code>expression</code>, pick <code>NUMBER</code>, and use <code>6</code>. 3. For the operator, pick <code>&quot;/&quot;</code>. 4. For the right-hand <code>expression</code>, pick <code>binary</code> again. 5. In that nested <code>binary</code> expression, pick <code>3 - 1</code>.</p>
+<p>Another is:</p>
+<p>1. Starting at <code>expression</code>, pick <code>binary</code>. 2. For the left-hand <code>expression</code>, pick <code>binary</code> again. 3. In that nested <code>binary</code> expression, pick <code>6 / 3</code>. 4. Back at the outer <code>binary</code>, for the operator, pick <code>&quot;-&quot;</code>. 5. For the right-hand <code>expression</code>, pick <code>NUMBER</code>, and use <code>1</code>.</p>
+<p>Those produce the same <em>strings</em>, but not the same <em>syntax trees</em>:</p>
+<p>&lt;img src=&quot;image/parsing-expressions/syntax-trees.png&quot; alt=&quot;Two valid syntax trees: (6 / 3) - 1 and 6 / (3 - 1)&quot; /&gt;</p>
+<p>In other words, the grammar allows seeing the expression as <code>(6 / 3) - 1</code> or `6 / (3 - 1)<code>. The </code>binary` rule lets operands nest any which way you want. That in turn affects the result of evaluating the parsed tree. The way mathematicians have addressed this ambiguity since blackboards were first invented is by defining rules for precedence and associativity.</p>
+<ul>
+<li>  &lt;span name=&quot;nonassociative&quot;&gt;<strong>Precedence</strong>&lt;/span&gt; determines which operator</li>
+</ul>
+<p>    is evaluated first in an expression containing a mixture of different     operators. Precedence rules tell us that we evaluate the <code>/</code> before the <code>-</code>     in the above example. Operators with higher precedence are evaluated     before operators with lower precedence. Equivalently, higher precedence     operators are said to &quot;bind tighter&quot;.</p>
+<ul>
+<li>  <strong>Associativity</strong> determines which operator is evaluated first in a series</li>
+</ul>
+<p>    of the <em>same</em> operator. When an operator is <strong>left-associative</strong> (think     &quot;left-to-right&quot;), operators on the left evaluate before those on the right.     Since <code>-</code> is left-associative, this expression:</p>
+<p>    <code></code>`lox     5 - 3 - 1     <code></code>`</p>
+<p>    is equivalent to:</p>
+<p>    <code></code>`lox     (5 - 3) - 1     <code></code>`</p>
+<p>    Assignment, on the other hand, is <strong>right-associative</strong>. This:</p>
+<p>    <code></code>`lox     a = b = c     <code></code>`</p>
+<p>    is equivalent to:</p>
+<p>    <code></code>`lox     a = (b = c)     <code></code>`</p>
+<p>&lt;aside name=&quot;nonassociative&quot;&gt;</p>
+<p>While not common these days, some languages specify that certain pairs of operators have <em>no</em> relative precedence. That makes it a syntax error to mix those operators in an expression without using explicit grouping.</p>
+<p>Likewise, some operators are <strong>non-associative</strong>. That means it&#x27;s an error to use that operator more than once in a sequence. For example, Perl&#x27;s range operator isn&#x27;t associative, so <code>a .. b</code> is OK, but <code>a .. b .. c</code> is an error.</p>
+<p>&lt;/aside&gt;</p>
+<p>Without well-defined precedence and associativity, an expression that uses multiple operators is ambiguous -- it can be parsed into different syntax trees, which could in turn evaluate to different results. We&#x27;ll fix that in Lox by applying the same precedence rules as C, going from lowest to highest.</p>
+<p>&lt;table&gt; &lt;thead&gt; &lt;tr&gt;   &lt;td&gt;Name&lt;/td&gt;   &lt;td&gt;Operators&lt;/td&gt;   &lt;td&gt;Associates&lt;/td&gt; &lt;/tr&gt; &lt;/thead&gt; &lt;tbody&gt; &lt;tr&gt;   &lt;td&gt;Equality&lt;/td&gt;   &lt;td&gt;&lt;code&gt;==&lt;/code&gt; &lt;code&gt;!=&lt;/code&gt;&lt;/td&gt;   &lt;td&gt;Left&lt;/td&gt; &lt;/tr&gt; &lt;tr&gt;   &lt;td&gt;Comparison&lt;/td&gt;   &lt;td&gt;&lt;code&gt;&amp;gt;&lt;/code&gt; &lt;code&gt;&amp;gt;=&lt;/code&gt;       &lt;code&gt;&amp;lt;&lt;/code&gt; &lt;code&gt;&amp;lt;=&lt;/code&gt;&lt;/td&gt;   &lt;td&gt;Left&lt;/td&gt; &lt;/tr&gt; &lt;tr&gt;   &lt;td&gt;Term&lt;/td&gt;   &lt;td&gt;&lt;code&gt;-&lt;/code&gt; &lt;code&gt;+&lt;/code&gt;&lt;/td&gt;   &lt;td&gt;Left&lt;/td&gt; &lt;/tr&gt; &lt;tr&gt;   &lt;td&gt;Factor&lt;/td&gt;   &lt;td&gt;&lt;code&gt;/&lt;/code&gt; &lt;code&gt;*&lt;/code&gt;&lt;/td&gt;   &lt;td&gt;Left&lt;/td&gt; &lt;/tr&gt; &lt;tr&gt;   &lt;td&gt;Unary&lt;/td&gt;   &lt;td&gt;&lt;code&gt;!&lt;/code&gt; &lt;code&gt;-&lt;/code&gt;&lt;/td&gt;   &lt;td&gt;Right&lt;/td&gt; &lt;/tr&gt; &lt;/tbody&gt; &lt;/table&gt;</p>
+<p>Right now, the grammar stuffs all expression types into a single <code>expression</code> rule. That same rule is used as the non-terminal for operands, which lets the grammar accept any kind of expression as a subexpression, regardless of whether the precedence rules allow it.</p>
+<p>We fix that by &lt;span name=&quot;massage&quot;&gt;stratifying&lt;/span&gt; the grammar. We define a separate rule for each precedence level.</p>
+<pre class="ebnf"><code>expression     → ...
+equality       → ...
+comparison     → ...
+term           → ...
+factor         → ...
+unary          → ...
+primary        → ...</code></pre>
+<p>&lt;aside name=&quot;massage&quot;&gt;</p>
+<p>Instead of baking precedence right into the grammar rules, some parser generators let you keep the same ambiguous-but-simple grammar and then add in a little explicit operator precedence metadata on the side in order to disambiguate.</p>
+<p>&lt;/aside&gt;</p>
+<p>Each rule here only matches expressions at its precedence level or higher. For example, <code>unary</code> matches a unary expression like <code>!negated</code> or a primary expression like <code>1234</code>. And <code>term</code> can match <code>1 + 2</code> but also <code>3 * 4 / 5</code>. The final <code>primary</code> rule covers the highest-precedence forms -- literals and parenthesized expressions.</p>
+<p>We just need to fill in the productions for each of those rules. We&#x27;ll do the easy ones first. The top <code>expression</code> rule matches any expression at any precedence level. Since &lt;span name=&quot;equality&quot;&gt;<code>equality</code>&lt;/span&gt; has the lowest precedence, if we match that, then it covers everything.</p>
+<p>&lt;aside name=&quot;equality&quot;&gt;</p>
+<p>We could eliminate <code>expression</code> and simply use <code>equality</code> in the other rules that contain expressions, but using <code>expression</code> makes those other rules read a little better.</p>
+<p>Also, in later chapters when we expand the grammar to include assignment and logical operators, we&#x27;ll only need to change the production for <code>expression</code> instead of touching every rule that contains an expression.</p>
+<p>&lt;/aside&gt;</p>
+<pre class="ebnf"><code>expression     → equality</code></pre>
+<p>Over at the other end of the precedence table, a primary expression contains all the literals and grouping expressions.</p>
+<pre class="ebnf"><code>primary        → NUMBER | STRING | &quot;true&quot; | &quot;false&quot; | &quot;nil&quot;
+               | &quot;(&quot; expression &quot;)&quot; ;</code></pre>
+<p>A unary expression starts with a unary operator followed by the operand. Since unary operators can nest -- <code>!!true</code> is a valid if weird expression -- the operand can itself be a unary operator. A recursive rule handles that nicely.</p>
+<pre class="ebnf"><code>unary          → ( &quot;!&quot; | &quot;-&quot; ) unary ;</code></pre>
+<p>But this rule has a problem. It never terminates.</p>
+<p>Remember, each rule needs to match expressions at that precedence level <em>or higher</em>, so we also need to let this match a primary expression.</p>
+<pre class="ebnf"><code>unary          → ( &quot;!&quot; | &quot;-&quot; ) unary
+               | primary ;</code></pre>
+<p>That works.</p>
+<p>The remaining rules are all binary operators. We&#x27;ll start with the rule for multiplication and division. Here&#x27;s a first try:</p>
+<pre class="ebnf"><code>factor         → factor ( &quot;/&quot; | &quot;*&quot; ) unary
+               | unary ;</code></pre>
+<p>The rule recurses to match the left operand. That enables the rule to match a series of multiplication and division expressions like <code>1 * 2 / 3</code>. Putting the recursive production on the left side and <code>unary</code> on the right makes the rule &lt;span name=&quot;mult&quot;&gt;left-associative&lt;/span&gt; and unambiguous.</p>
+<p>&lt;aside name=&quot;mult&quot;&gt;</p>
+<p>In principle, it doesn&#x27;t matter whether you treat multiplication as left- or right-associative -- you get the same result either way. Alas, in the real world with limited precision, roundoff and overflow mean that associativity can affect the result of a sequence of multiplications. Consider:</p>
+<pre class="lox"><code>print 0.1 * (0.2 * 0.3);
+print (0.1 * 0.2) * 0.3;</code></pre>
+<p>In languages like Lox that use [IEEE 754][754</p>
+<p>] double-precision floating-point numbers, the first evaluates to <code>0.006</code>, while the second yields <code>0.006000000000000001</code>. Sometimes that tiny difference matters. [This][float</p>
+<p>] is a good place to learn more.</p>
+<p>[754]: https://en.wikipedia.org/wiki/Double-precision_floating-point_format [float</p>
+<p>]: https://docs.oracle.com/cd/E19957-01/806-3568/ncg_goldberg.html</p>
+<p>&lt;/aside&gt;</p>
+<p>All of this is correct, but the fact that the first symbol in the body of the rule is the same as the head of the rule means this production is <strong>left-recursive</strong>. Some parsing techniques, including the one we&#x27;re going to use, have trouble with left recursion. (Recursion elsewhere, like we have in <code>unary</code> and the indirect recursion for grouping in <code>primary</code> are not a problem.)</p>
+<p>There are many grammars you can define that match the same language. The choice for how to model a particular language is partially a matter of taste and partially a pragmatic one. This rule is correct, but not optimal for how we intend to parse it. Instead of a left recursive rule, we&#x27;ll use a different one.</p>
+<pre class="ebnf"><code>factor         → unary ( ( &quot;/&quot; | &quot;*&quot; ) unary )* ;</code></pre>
+<p>We define a factor expression as a flat <em>sequence</em> of multiplications and divisions. This matches the same syntax as the previous rule, but better mirrors the code we&#x27;ll write to parse Lox. We use the same structure for all of the other binary operator precedence levels, giving us this complete expression grammar:</p>
+<pre class="ebnf"><code>expression     → equality ;
+equality       → comparison ( ( &quot;!=&quot; | &quot;==&quot; ) comparison )* ;
+comparison     → term ( ( &quot;&gt;&quot; | &quot;&gt;=&quot; | &quot;&lt;&quot; | &quot;&lt;=&quot; ) term )* ;
+term           → factor ( ( &quot;-&quot; | &quot;+&quot; ) factor )* ;
+factor         → unary ( ( &quot;/&quot; | &quot;*&quot; ) unary )* ;
+unary          → ( &quot;!&quot; | &quot;-&quot; ) unary
+               | primary ;
+primary        → NUMBER | STRING | &quot;true&quot; | &quot;false&quot; | &quot;nil&quot;
+               | &quot;(&quot; expression &quot;)&quot; ;</code></pre>
+<p>This grammar is more complex than the one we had before, but in return we have eliminated the previous one&#x27;s ambiguity. It&#x27;s just what we need to make a parser.</p>
+<h2>Recursive Descent Parsing</h2>
+<p>There is a whole pack of parsing techniques whose names are mostly combinations of &quot;L&quot; and &quot;R&quot; -- [LL(k)][</p>
+<p>], [LR(1)][lr</p>
+<p>], [LALR][</p>
+<p>] -- along with more exotic beasts like [parser combinators][</p>
+<p>], [Earley parsers][</p>
+<p>], [the shunting yard algorithm][yard</p>
+<p>], and [packrat parsing][</p>
+<p>]. For our first interpreter, one technique is more than sufficient: <strong>recursive descent</strong>.</p>
+<p>[ll(k)]: https://en.wikipedia.org/wiki/LL_parser [lr</p>
+<p>]: https://en.wikipedia.org/wiki/LR_parser [lalr]: https://en.wikipedia.org/wiki/LALR_parser [parser combinators</p>
+<p>]: https://en.wikipedia.org/wiki/Parser_combinator [earley parsers]: https://en.wikipedia.org/wiki/Earley_parser [yard</p>
+<p>]: https://en.wikipedia.org/wiki/Shunting-yard_algorithm [packrat parsing]: https://en.wikipedia.org/wiki/Parsing_expression_grammar</p>
+<p>Recursive descent is the simplest way to build a parser, and doesn&#x27;t require using complex parser generator tools like Yacc, Bison or ANTLR. All you need is straightforward handwritten code. Don&#x27;t be fooled by its simplicity, though. Recursive descent parsers are fast, robust, and can support sophisticated error handling. In fact, GCC, V8 (the JavaScript VM in Chrome), Roslyn (the C# compiler written in C#) and many other heavyweight production language implementations use recursive descent. It rocks.</p>
+<p>Recursive descent is considered a <strong>top-down parser</strong> because it starts from the top or outermost grammar rule (here <code>expression</code>) and works its way &lt;span name=&quot;descent&quot;&gt;down&lt;/span&gt; into the nested subexpressions before finally reaching the leaves of the syntax tree. This is in contrast with bottom-up parsers like LR that start with primary expressions and compose them into larger and larger chunks of syntax.</p>
+<p>&lt;aside name=&quot;descent&quot;&gt;</p>
+<p>It&#x27;s called &quot;recursive <em>descent</em>&quot; because it walks <em>down</em> the grammar. Confusingly, we also use direction metaphorically when talking about &quot;high&quot; and &quot;low&quot; precedence, but the orientation is reversed. In a top-down parser, you reach the lowest-precedence expressions first because they may in turn contain subexpressions of higher precedence.</p>
+<p>&lt;img src=&quot;image/parsing-expressions/direction.png&quot; alt=&quot;Top-down grammar rules in order of increasing precedence.&quot; /&gt;</p>
+<p>CS people really need to get together and straighten out their metaphors. Don&#x27;t even get me started on which direction a stack grows or why trees have their roots on top.</p>
+<p>&lt;/aside&gt;</p>
+<p>A recursive descent parser is a literal translation of the grammar&#x27;s rules straight into imperative code. Each rule becomes a function. The body of the rule translates to code roughly like:</p>
+<p>&lt;table&gt; &lt;thead&gt; &lt;tr&gt;   &lt;td&gt;Grammar notation&lt;/td&gt;   &lt;td&gt;Code representation&lt;/td&gt; &lt;/tr&gt; &lt;/thead&gt; &lt;tbody&gt;   &lt;tr&gt;&lt;td&gt;Terminal&lt;/td&gt;&lt;td&gt;Code to match and consume a token&lt;/td&gt;&lt;/tr&gt;   &lt;tr&gt;&lt;td&gt;Nonterminal&lt;/td&gt;&lt;td&gt;Call to that rule&amp;rsquo;s function&lt;/td&gt;&lt;/tr&gt;   &lt;tr&gt;&lt;td&gt;&lt;code&gt;|&lt;/code&gt;&lt;/td&gt;&lt;td&gt;&lt;code&gt;if&lt;/code&gt; or &lt;code&gt;switch&lt;/code&gt; statement&lt;/td&gt;&lt;/tr&gt;   &lt;tr&gt;&lt;td&gt;&lt;code&gt;*&lt;/code&gt; or &lt;code&gt;+&lt;/code&gt;&lt;/td&gt;&lt;td&gt;&lt;code&gt;while&lt;/code&gt; or &lt;code&gt;for&lt;/code&gt; loop&lt;/td&gt;&lt;/tr&gt;   &lt;tr&gt;&lt;td&gt;&lt;code&gt;?&lt;/code&gt;&lt;/td&gt;&lt;td&gt;&lt;code&gt;if&lt;/code&gt; statement&lt;/td&gt;&lt;/tr&gt; &lt;/tbody&gt; &lt;/table&gt;</p>
+<p>The descent is described as &quot;recursive&quot; because when a grammar rule refers to itself -- directly or indirectly -- that translates to a recursive function call.</p>
+<h3>The parser class</h3>
+<p>Each grammar rule becomes a method inside this new class:</p>
+<p>^code parser</p>
+<p>Like the scanner, the parser consumes a flat input sequence, only now we&#x27;re reading tokens instead of characters. We store the list of tokens and use <code>current</code> to point to the next token eagerly waiting to be parsed.</p>
+<p>We&#x27;re going to run straight through the expression grammar now and translate each rule to Java code. The first rule, <code>expression</code>, simply expands to the <code>equality</code> rule, so that&#x27;s straightforward.</p>
+<p>^code expression</p>
+<p>Each method for parsing a grammar rule produces a syntax tree for that rule and returns it to the caller. When the body of the rule contains a nonterminal -- a reference to another rule -- we &lt;span name=&quot;left&quot;&gt;call&lt;/span&gt; that other rule&#x27;s method.</p>
+<p>&lt;aside name=&quot;left&quot;&gt;</p>
+<p>This is why left recursion is problematic for recursive descent. The function for a left-recursive rule immediately calls itself, which calls itself again, and so on, until the parser hits a stack overflow and dies.</p>
+<p>&lt;/aside&gt;</p>
+<p>The rule for equality is a little more complex.</p>
+<pre class="ebnf"><code>equality       → comparison ( ( &quot;!=&quot; | &quot;==&quot; ) comparison )* ;</code></pre>
+<p>In Java, that becomes:</p>
+<p>^code equality</p>
+<p>Let&#x27;s step through it. The first <code>comparison</code> nonterminal in the body translates to the first call to <code>comparison()</code> in the method. We take that result and store it in a local variable.</p>
+<p>Then, the <code>( ... )*</code> loop in the rule maps to a <code>while</code> loop. We need to know when to exit that loop. We can see that inside the rule, we must first find either a <code>!=</code> or <code>==</code> token. So, if we <em>don&#x27;t</em> see one of those, we must be done with the sequence of equality operators. We express that check using a handy <code>match()</code> method.</p>
+<p>^code match</p>
+<p>This checks to see if the current token has any of the given types. If so, it consumes the token and returns <code>true</code>. Otherwise, it returns <code>false</code> and leaves the current token alone. The <code>match()</code> method is defined in terms of two more fundamental operations.</p>
+<p>The <code>check()</code> method returns <code>true</code> if the current token is of the given type. Unlike <code>match()</code>, it never consumes the token, it only looks at it.</p>
+<p>^code check</p>
+<p>The <code>advance()</code> method consumes the current token and returns it, similar to how our scanner&#x27;s corresponding method crawled through characters.</p>
+<p>^code advance</p>
+<p>These methods bottom out on the last handful of primitive operations.</p>
+<p>^code utils</p>
+<p><code>isAtEnd()</code> checks if we&#x27;ve run out of tokens to parse. <code>peek()</code> returns the current token we have yet to consume, and <code>previous()</code> returns the most recently consumed token. The latter makes it easier to use <code>match()</code> and then access the just-matched token.</p>
+<p>That&#x27;s most of the parsing infrastructure we need. Where were we? Right, so if we are inside the <code>while</code> loop in <code>equality()</code>, then we know we have found a <code>!=</code> or <code>==</code> operator and must be parsing an equality expression.</p>
+<p>We grab the matched operator token so we can track which kind of equality expression we have. Then we call <code>comparison()</code> again to parse the right-hand operand. We combine the operator and its two operands into a new <code>Expr.Binary</code> syntax tree node, and then loop around. For each iteration, we store the resulting expression back in the same <code>expr</code> local variable. As we zip through a sequence of equality expressions, that creates a left-associative nested tree of binary operator nodes.</p>
+<p>&lt;span name=&quot;sequence&quot;&gt;&lt;/span&gt;</p>
+<p>&lt;img src=&quot;image/parsing-expressions/sequence.png&quot; alt=&quot;The syntax tree created by parsing &#x27;a == b == c == d == e&#x27;&quot; /&gt;</p>
+<p>&lt;aside name=&quot;sequence&quot;&gt;</p>
+<p>Parsing <code>a == b == c == d == e</code>. For each iteration, we create a new binary expression using the previous one as the left operand.</p>
+<p>&lt;/aside&gt;</p>
+<p>The parser falls out of the loop once it hits a token that&#x27;s not an equality operator. Finally, it returns the expression. Note that if the parser never encounters an equality operator, then it never enters the loop. In that case, the <code>equality()</code> method effectively calls and returns <code>comparison()</code>. In that way, this method matches an equality operator <em>or anything of higher precedence</em>.</p>
+<p>Moving on to the next rule...</p>
+<pre class="ebnf"><code>comparison     → term ( ( &quot;&gt;&quot; | &quot;&gt;=&quot; | &quot;&lt;&quot; | &quot;&lt;=&quot; ) term )* ;</code></pre>
+<p>Translated to Java:</p>
+<p>^code comparison</p>
+<p>The grammar rule is virtually &lt;span name=&quot;handle&quot;&gt;identical&lt;/span&gt; to <code>equality</code> and so is the corresponding code. The only differences are the token types for the operators we match, and the method we call for the operands -- now <code>term()</code> instead of <code>comparison()</code>. The remaining two binary operator rules follow the same pattern.</p>
+<p>In order of precedence, first addition and subtraction:</p>
+<p>&lt;aside name=&quot;handle&quot;&gt;</p>
+<p>If you wanted to do some clever Java 8, you could create a helper method for parsing a left-associative series of binary operators given a list of token types, and an operand method handle to simplify this redundant code.</p>
+<p>&lt;/aside&gt;</p>
+<p>^code term</p>
+<p>And finally, multiplication and division:</p>
+<p>^code factor</p>
+<p>That&#x27;s all of the binary operators, parsed with the correct precedence and associativity. We&#x27;re crawling up the precedence hierarchy and now we&#x27;ve reached the unary operators.</p>
+<pre class="ebnf"><code>unary          → ( &quot;!&quot; | &quot;-&quot; ) unary
+               | primary ;</code></pre>
+<p>The code for this is a little different.</p>
+<p>^code unary</p>
+<p>Again, we look at the &lt;span name=&quot;current&quot;&gt;current&lt;/span&gt; token to see how to parse. If it&#x27;s a <code>!</code> or <code>-</code>, we must have a unary expression. In that case, we grab the token and then recursively call <code>unary()</code> again to parse the operand. Wrap that all up in a unary expression syntax tree and we&#x27;re done.</p>
+<p>&lt;aside name=&quot;current&quot;&gt;</p>
+<p>The fact that the parser looks ahead at upcoming tokens to decide how to parse puts recursive descent into the category of <strong>predictive parsers</strong>.</p>
+<p>&lt;/aside&gt;</p>
+<p>Otherwise, we must have reached the highest level of precedence, primary expressions.</p>
+<pre class="ebnf"><code>primary        → NUMBER | STRING | &quot;true&quot; | &quot;false&quot; | &quot;nil&quot;
+               | &quot;(&quot; expression &quot;)&quot; ;</code></pre>
+<p>Most of the cases for the rule are single terminals, so parsing is straightforward.</p>
+<p>^code primary</p>
+<p>The interesting branch is the one for handling parentheses. After we match an opening <code>(</code> and parse the expression inside it, we <em>must</em> find a <code>)</code> token. If we don&#x27;t, that&#x27;s an error.</p>
+<h2>Syntax Errors</h2>
+<p>A parser really has two jobs:</p>
+<p>1.  Given a valid sequence of tokens, produce a corresponding syntax tree.</p>
+<p>2.  Given an <em>invalid</em> sequence of tokens, detect any errors and tell the     user about their mistakes.</p>
+<p>Don&#x27;t underestimate how important the second job is! In modern IDEs and editors, the parser is constantly reparsing code -- often while the user is still editing it -- in order to syntax highlight and support things like auto-complete. That means it will encounter code in incomplete, half-wrong states <em>all the time.</em></p>
+<p>When the user doesn&#x27;t realize the syntax is wrong, it is up to the parser to help guide them back onto the right path. The way it reports errors is a large part of your language&#x27;s user interface. Good syntax error handling is hard. By definition, the code isn&#x27;t in a well-defined state, so there&#x27;s no infallible way to know what the user <em>meant</em> to write. The parser can&#x27;t read your &lt;span name=&quot;telepathy&quot;&gt;mind&lt;/span&gt;.</p>
+<p>&lt;aside name=&quot;telepathy&quot;&gt;</p>
+<p>Not yet at least. With the way things are going in machine learning these days, who knows what the future will bring?</p>
+<p>&lt;/aside&gt;</p>
+<p>There are a couple of hard requirements for when the parser runs into a syntax error. A parser must:</p>
+<ul>
+<li>  <strong>Detect and report the error.</strong> If it doesn&#x27;t detect the &lt;span</li>
+</ul>
+<p>    name=&quot;error&quot;&gt;error&lt;/span&gt; and passes the resulting malformed syntax tree on     to the interpreter, all manner of horrors may be summoned.</p>
+<p>    &lt;aside name=&quot;error&quot;&gt;</p>
+<p>    Philosophically speaking, if an error isn&#x27;t detected and the interpreter     runs the code, is it <em>really</em> an error?</p>
+<p>    &lt;/aside&gt;</p>
+<ul>
+<li>  <strong>Avoid crashing or hanging.</strong> Syntax errors are a fact of life, and</li>
+</ul>
+<p>    language tools have to be robust in the face of them. Segfaulting or getting     stuck in an infinite loop isn&#x27;t allowed. While the source may not be valid     <em>code</em>, it&#x27;s still a valid <em>input to the parser</em> because users use the     parser to learn what syntax is allowed.</p>
+<p>Those are the table stakes if you want to get in the parser game at all, but you really want to raise the ante beyond that. A decent parser should:</p>
+<ul>
+<li>  <strong>Be fast.</strong> Computers are thousands of times faster than they were when</li>
+</ul>
+<p>    parser technology was first invented. The days of needing to optimize your     parser so that it could get through an entire source file during a coffee     break are over. But programmer expectations have risen as quickly, if not     faster. They expect their editors to reparse files in milliseconds after     every keystroke.</p>
+<ul>
+<li>  <strong>Report as many distinct errors as there are.</strong> Aborting after the first</li>
+</ul>
+<p>    error is easy to implement, but it&#x27;s annoying for users if every time they     fix what they think is the one error in a file, a new one appears. They     want to see them all.</p>
+<ul>
+<li>  <strong>Minimize <em>cascaded</em> errors.</strong> Once a single error is found, the parser no</li>
+</ul>
+<p>    longer really knows what&#x27;s going on. It tries to get itself back on track     and keep going, but if it gets confused, it may report a slew of ghost     errors that don&#x27;t indicate other real problems in the code. When the first     error is fixed, those phantoms disappear, because they reflect only the     parser&#x27;s own confusion. Cascaded errors are annoying because they can scare     the user into thinking their code is in a worse state than it is.</p>
+<p>The last two points are in tension. We want to report as many separate errors as we can, but we don&#x27;t want to report ones that are merely side effects of an earlier one.</p>
+<p>The way a parser responds to an error and keeps going to look for later errors is called <strong>error recovery</strong>. This was a hot research topic in the &#x27;60s. Back then, you&#x27;d hand a stack of punch cards to the secretary and come back the next day to see if the compiler succeeded. With an iteration loop that slow, you <em>really</em> wanted to find every single error in your code in one pass.</p>
+<p>Today, when parsers complete before you&#x27;ve even finished typing, it&#x27;s less of an issue. Simple, fast error recovery is fine.</p>
+<h3>Panic mode error recovery</h3>
+<p>&lt;aside name=&quot;panic&quot;&gt;</p>
+<p>You know you want to push it.</p>
+<p>&lt;img src=&quot;image/parsing-expressions/panic.png&quot; alt=&quot;A big shiny &#x27;PANIC&#x27; button.&quot; /&gt;</p>
+<p>&lt;/aside&gt;</p>
+<p>Of all the recovery techniques devised in yesteryear, the one that best stood the test of time is called -- somewhat alarmingly -- &lt;span name=&quot;panic&quot;&gt;<strong>panic mode</strong>&lt;/span&gt;. As soon as the parser detects an error, it enters panic mode. It knows at least one token doesn&#x27;t make sense given its current state in the middle of some stack of grammar productions.</p>
+<p>Before it can get back to parsing, it needs to get its state and the sequence of forthcoming tokens aligned such that the next token does match the rule being parsed. This process is called <strong>synchronization</strong>.</p>
+<p>To do that, we select some rule in the grammar that will mark the synchronization point. The parser fixes its parsing state by jumping out of any nested productions until it gets back to that rule. Then it synchronizes the token stream by discarding tokens until it reaches one that can appear at that point in the rule.</p>
+<p>Any additional real syntax errors hiding in those discarded tokens aren&#x27;t reported, but it also means that any mistaken cascaded errors that are side effects of the initial error aren&#x27;t <em>falsely</em> reported either, which is a decent trade-off.</p>
+<p>The traditional place in the grammar to synchronize is between statements. We don&#x27;t have those yet, so we won&#x27;t actually synchronize in this chapter, but we&#x27;ll get the machinery in place for later.</p>
+<h3>Entering panic mode</h3>
+<p>Back before we went on this side trip around error recovery, we were writing the code to parse a parenthesized expression. After parsing the expression, the parser looks for the closing <code>)</code> by calling <code>consume()</code>. Here, finally, is that method:</p>
+<p>^code consume</p>
+<p>It&#x27;s similar to <code>match()</code> in that it checks to see if the next token is of the expected type. If so, it consumes the token and everything is groovy. If some other token is there, then we&#x27;ve hit an error. We report it by calling this:</p>
+<p>^code error</p>
+<p>First, that shows the error to the user by calling:</p>
+<p>^code token-error</p>
+<p>This reports an error at a given token. It shows the token&#x27;s location and the token itself. This will come in handy later since we use tokens throughout the interpreter to track locations in code.</p>
+<p>After we report the error, the user knows about their mistake, but what does the <em>parser</em> do next? Back in <code>error()</code>, we create and return a ParseError, an instance of this new class:</p>
+<p>^code parse-error (1 before, 1 after)</p>
+<p>This is a simple sentinel class we use to unwind the parser. The <code>error()</code> method <em>returns</em> the error instead of <em>throwing</em> it because we want to let the calling method inside the parser decide whether to unwind or not. Some parse errors occur in places where the parser isn&#x27;t likely to get into a weird state and we don&#x27;t need to &lt;span name=&quot;production&quot;&gt;synchronize&lt;/span&gt;. In those places, we simply report the error and keep on truckin&#x27;.</p>
+<p>For example, Lox limits the number of arguments you can pass to a function. If you pass too many, the parser needs to report that error, but it can and should simply keep on parsing the extra arguments instead of freaking out and going into panic mode.</p>
+<p>&lt;aside name=&quot;production&quot;&gt;</p>
+<p>Another way to handle common syntax errors is with <strong>error productions</strong>. You augment the grammar with a rule that <em>successfully</em> matches the <em>erroneous</em> syntax. The parser safely parses it but then reports it as an error instead of producing a syntax tree.</p>
+<p>For example, some languages have a unary <code>+</code> operator, like <code>+123</code>, but Lox does not. Instead of getting confused when the parser stumbles onto a <code>+</code> at the beginning of an expression, we could extend the unary rule to allow it.</p>
+<pre class="ebnf"><code>unary → ( &quot;!&quot; | &quot;-&quot; | &quot;+&quot; ) unary
+      | primary ;</code></pre>
+<p>This lets the parser consume <code>+</code> without going into panic mode or leaving the parser in a weird state.</p>
+<p>Error productions work well because you, the parser author, know <em>how</em> the code is wrong and what the user was likely trying to do. That means you can give a more helpful message to get the user back on track, like, &quot;Unary &#x27;+&#x27; expressions are not supported.&quot; Mature parsers tend to accumulate error productions like barnacles since they help users fix common mistakes.</p>
+<p>&lt;/aside&gt;</p>
+<p>In our case, though, the syntax error is nasty enough that we want to panic and synchronize. Discarding tokens is pretty easy, but how do we synchronize the parser&#x27;s own state?</p>
+<h3>Synchronizing a recursive descent parser</h3>
+<p>With recursive descent, the parser&#x27;s state -- which rules it is in the middle of recognizing -- is not stored explicitly in fields. Instead, we use Java&#x27;s own call stack to track what the parser is doing. Each rule in the middle of being parsed is a call frame on the stack. In order to reset that state, we need to clear out those call frames.</p>
+<p>The natural way to do that in Java is exceptions. When we want to synchronize, we <em>throw</em> that ParseError object. Higher up in the method for the grammar rule we are synchronizing to, we&#x27;ll catch it. Since we synchronize on statement boundaries, we&#x27;ll catch the exception there. After the exception is caught, the parser is in the right state. All that&#x27;s left is to synchronize the tokens.</p>
+<p>We want to discard tokens until we&#x27;re right at the beginning of the next statement. That boundary is pretty easy to spot -- it&#x27;s one of the main reasons we picked it. <em>After</em> a semicolon, we&#x27;re &lt;span name=&quot;semicolon&quot;&gt;probably&lt;/span&gt; finished with a statement. Most statements start with a keyword -- <code>for</code>, <code>if</code>, <code>return</code>, <code>var</code>, etc. When the <em>next</em> token is any of those, we&#x27;re probably about to start a statement.</p>
+<p>&lt;aside name=&quot;semicolon&quot;&gt;</p>
+<p>I say &quot;probably&quot; because we could hit a semicolon separating clauses in a <code>for</code> loop. Our synchronization isn&#x27;t perfect, but that&#x27;s OK. We&#x27;ve already reported the first error precisely, so everything after that is kind of &quot;best effort&quot;.</p>
+<p>&lt;/aside&gt;</p>
+<p>This method encapsulates that logic:</p>
+<p>^code synchronize</p>
+<p>It discards tokens until it thinks it has found a statement boundary. After catching a ParseError, we&#x27;ll call this and then we are hopefully back in sync. When it works well, we have discarded tokens that would have likely caused cascaded errors anyway, and now we can parse the rest of the file starting at the next statement.</p>
+<p>Alas, we don&#x27;t get to see this method in action, since we don&#x27;t have statements yet. We&#x27;ll get to that [in a couple of chapters][statements</p>
+<p>]. For now, if an error occurs, we&#x27;ll panic and unwind all the way to the top and stop parsing. Since we can parse only a single expression anyway, that&#x27;s no big loss.</p>
+<p>[statements]: statements-and-state.html</p>
+<h2>Wiring up the Parser</h2>
+<p>We are mostly done parsing expressions now. There is one other place where we need to add a little error handling. As the parser descends through the parsing methods for each grammar rule, it eventually hits <code>primary()</code>. If none of the cases in there match, it means we are sitting on a token that can&#x27;t start an expression. We need to handle that error too.</p>
+<p>^code primary-error (5 before, 1 after)</p>
+<p>With that, all that remains in the parser is to define an initial method to kick it off. That method is called, naturally enough, <code>parse()</code>.</p>
+<p>^code parse</p>
+<p>We&#x27;ll revisit this method later when we add statements to the language. For now, it parses a single expression and returns it. We also have some temporary code to exit out of panic mode. Syntax error recovery is the parser&#x27;s job, so we don&#x27;t want the ParseError exception to escape into the rest of the interpreter.</p>
+<p>When a syntax error does occur, this method returns <code>null</code>. That&#x27;s OK. The parser promises not to crash or hang on invalid syntax, but it doesn&#x27;t promise to return a <em>usable syntax tree</em> if an error is found. As soon as the parser reports an error, <code>hadError</code> gets set, and subsequent phases are skipped.</p>
+<p>Finally, we can hook up our brand new parser to the main Lox class and try it out. We still don&#x27;t have an interpreter, so for now, we&#x27;ll parse to a syntax tree and then use the AstPrinter class from the [last chapter][ast-printer</p>
+<p>] to display it.</p>
+<p>[ast-printer]: representing-code.html#a-not-very-pretty-printer</p>
+<p>Delete the old code to print the scanned tokens and replace it with this:</p>
+<p>^code print-ast (1 before, 1 after)</p>
+<p>Congratulations, you have crossed the &lt;span name=&quot;harder&quot;&gt;threshold&lt;/span&gt;! That really is all there is to handwriting a parser. We&#x27;ll extend the grammar in later chapters with assignment, statements, and other stuff, but none of that is any more complex than the binary operators we tackled here.</p>
+<p>&lt;aside name=&quot;harder&quot;&gt;</p>
+<p>It is possible to define a more complex grammar than Lox&#x27;s that&#x27;s difficult to parse using recursive descent. Predictive parsing gets tricky when you may need to look ahead a large number of tokens to figure out what you&#x27;re sitting on.</p>
+<p>In practice, most languages are designed to avoid that. Even in cases where they aren&#x27;t, you can usually hack around it without too much pain. If you can parse C++ using recursive descent -- which many C++ compilers do -- you can parse anything.</p>
+<p>&lt;/aside&gt;</p>
+<p>Fire up the interpreter and type in some expressions. See how it handles precedence and associativity correctly? Not bad for less than 200 lines of code.</p>
+<p>&lt;div class=&quot;challenges&quot;&gt;</p>
+<h2>Challenges</h2>
+<p>1.  In C, a block is a statement form that allows you to pack a series of     statements where a single one is expected. The [comma operator][</p>
+<p>] is an     analogous syntax for expressions. A comma-separated series of expressions     can be given where a single expression is expected (except inside a function     call&#x27;s argument list). At runtime, the comma operator evaluates the left     operand and discards the result. Then it evaluates and returns the right     operand.</p>
+<p>    Add support for comma expressions. Give them the same precedence and     associativity as in C. Write the grammar, and then implement the necessary     parsing code.</p>
+<p>2.  Likewise, add support for the C-style conditional or &quot;ternary&quot; operator     <code>?:</code>. What precedence level is allowed between the <code>?</code> and <code>:</code>? Is the whole     operator left-associative or right-associative?</p>
+<p>3.  Add error productions to handle each binary operator appearing without a     left-hand operand. In other words, detect a binary operator appearing at the     beginning of an expression. Report that as an error, but also parse and     discard a right-hand operand with the appropriate precedence.</p>
+<p>[comma operator]: https://en.wikipedia.org/wiki/Comma_operator</p>
+<p>&lt;/div&gt;</p>
+<p>&lt;div class=&quot;design-note&quot;&gt;</p>
+<h2>Design Note: Logic Versus History</h2>
+<p>Let&#x27;s say we decide to add bitwise <code>&amp;</code> and <code>|</code> operators to Lox. Where should we put them in the precedence hierarchy? C -- and most languages that follow in C&#x27;s footsteps -- place them below <code>==</code>. This is widely considered a mistake because it means common operations like testing a flag require parentheses.</p>
+<pre class="c"><code>if (flags &amp; FLAG_MASK == SOME_FLAG) { ... } // Wrong.
+if ((flags &amp; FLAG_MASK) == SOME_FLAG) { ... } // Right.</code></pre>
+<p>Should we fix this for Lox and put bitwise operators higher up the precedence table than C does? There are two strategies we can take.</p>
+<p>You almost never want to use the result of an <code>==</code> expression as the operand to a bitwise operator. By making bitwise bind tighter, users don&#x27;t need to parenthesize as often. So if we do that, and users assume the precedence is chosen logically to minimize parentheses, they&#x27;re likely to infer it correctly.</p>
+<p>This kind of internal consistency makes the language easier to learn because there are fewer edge cases and exceptions users have to stumble into and then correct. That&#x27;s good, because before users can use our language, they have to load all of that syntax and semantics into their heads. A simpler, more rational language <em>makes sense</em>.</p>
+<p>But, for many users there is an even faster shortcut to getting our language&#x27;s ideas into their wetware -- <em>use concepts they already know</em>. Many newcomers to our language will be coming from some other language or languages. If our language uses some of the same syntax or semantics as those, there is much less for the user to learn (and <em>unlearn</em>).</p>
+<p>This is particularly helpful with syntax. You may not remember it well today, but way back when you learned your very first programming language, code probably looked alien and unapproachable. Only through painstaking effort did you learn to read and accept it. If you design a novel syntax for your new language, you force users to start that process all over again.</p>
+<p>Taking advantage of what users already know is one of the most powerful tools you can use to ease adoption of your language. It&#x27;s almost impossible to overestimate how valuable this is. But it faces you with a nasty problem: What happens when the thing the users all know <em>kind of sucks</em>? C&#x27;s bitwise operator precedence is a mistake that doesn&#x27;t make sense. But it&#x27;s a <em>familiar</em> mistake that millions have already gotten used to and learned to live with.</p>
+<p>Do you stay true to your language&#x27;s own internal logic and ignore history? Do you start from a blank slate and first principles? Or do you weave your language into the rich tapestry of programming history and give your users a leg up by starting from something they already know?</p>
+<p>There is no perfect answer here, only trade-offs. You and I are obviously biased towards liking novel languages, so our natural inclination is to burn the history books and start our own story.</p>
+<p>In practice, it&#x27;s often better to make the most of what users already know. Getting them to come to your language requires a big leap. The smaller you can make that chasm, the more people will be willing to cross it. But you can&#x27;t <em>always</em> stick to history, or your language won&#x27;t have anything new and compelling to give people a <em>reason</em> to jump over.</p>
+<p>&lt;/div&gt; </p>

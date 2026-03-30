@@ -1,0 +1,72 @@
+<p>Here is a complete grammar for Lox. The chapters that introduce each part of the language include the grammar rules there, but this collects them all into one place.</p>
+<h2>Syntax Grammar</h2>
+<p>The syntactic grammar is used to parse the linear sequence of tokens into the nested syntax tree structure. It starts with the first rule that matches an entire Lox program (or a single REPL entry).</p>
+<pre class="ebnf"><code>program        → declaration* EOF ;</code></pre>
+<h3>Declarations</h3>
+<p>A program is a series of declarations, which are the statements that bind new identifiers or any of the other statement types.</p>
+<pre class="ebnf"><code>declaration    → classDecl
+               | funDecl
+               | varDecl
+               | statement ;
+
+classDecl      → &quot;class&quot; IDENTIFIER ( &quot;&lt;&quot; IDENTIFIER )?
+                 &quot;{&quot; function* &quot;}&quot; ;
+funDecl        → &quot;fun&quot; function ;
+varDecl        → &quot;var&quot; IDENTIFIER ( &quot;=&quot; expression )? &quot;;&quot; ;</code></pre>
+<h3>Statements</h3>
+<p>The remaining statement rules produce side effects, but do not introduce bindings.</p>
+<pre class="ebnf"><code>statement      → exprStmt
+               | forStmt
+               | ifStmt
+               | printStmt
+               | returnStmt
+               | whileStmt
+               | block ;
+
+exprStmt       → expression &quot;;&quot; ;
+forStmt        → &quot;for&quot; &quot;(&quot; ( varDecl | exprStmt | &quot;;&quot; )
+                           expression? &quot;;&quot;
+                           expression? &quot;)&quot; statement ;
+ifStmt         → &quot;if&quot; &quot;(&quot; expression &quot;)&quot; statement
+                 ( &quot;else&quot; statement )? ;
+printStmt      → &quot;print&quot; expression &quot;;&quot; ;
+returnStmt     → &quot;return&quot; expression? &quot;;&quot; ;
+whileStmt      → &quot;while&quot; &quot;(&quot; expression &quot;)&quot; statement ;
+block          → &quot;{&quot; declaration* &quot;}&quot; ;</code></pre>
+<p>Note that <code>block</code> is a statement rule, but is also used as a nonterminal in a couple of other rules for things like function bodies.</p>
+<h3>Expressions</h3>
+<p>Expressions produce values. Lox has a number of unary and binary operators with different levels of precedence. Some grammars for languages do not directly encode the precedence relationships and specify that elsewhere. Here, we use a separate rule for each precedence level to make it explicit.</p>
+<pre class="ebnf"><code>expression     → assignment ;
+
+assignment     → ( call &quot;.&quot; )? IDENTIFIER &quot;=&quot; assignment
+               | logic_or ;
+
+logic_or       → logic_and ( &quot;or&quot; logic_and )* ;
+logic_and      → equality ( &quot;and&quot; equality )* ;
+equality       → comparison ( ( &quot;!=&quot; | &quot;==&quot; ) comparison )* ;
+comparison     → term ( ( &quot;&gt;&quot; | &quot;&gt;=&quot; | &quot;&lt;&quot; | &quot;&lt;=&quot; ) term )* ;
+term           → factor ( ( &quot;-&quot; | &quot;+&quot; ) factor )* ;
+factor         → unary ( ( &quot;/&quot; | &quot;*&quot; ) unary )* ;
+
+unary          → ( &quot;!&quot; | &quot;-&quot; ) unary | call ;
+call           → primary ( &quot;(&quot; arguments? &quot;)&quot; | &quot;.&quot; IDENTIFIER )* ;
+primary        → &quot;true&quot; | &quot;false&quot; | &quot;nil&quot; | &quot;this&quot;
+               | NUMBER | STRING | IDENTIFIER | &quot;(&quot; expression &quot;)&quot;
+               | &quot;super&quot; &quot;.&quot; IDENTIFIER ;</code></pre>
+<h3>Utility rules</h3>
+<p>In order to keep the above rules a little cleaner, some of the grammar is split out into a few reused helper rules.</p>
+<pre class="ebnf"><code>function       → IDENTIFIER &quot;(&quot; parameters? &quot;)&quot; block ;
+parameters     → IDENTIFIER ( &quot;,&quot; IDENTIFIER )* ;
+arguments      → expression ( &quot;,&quot; expression )* ;</code></pre>
+<h2>Lexical Grammar</h2>
+<p>The lexical grammar is used by the scanner to group characters into tokens. Where the syntax is [context free][</p>
+<p>], the lexical grammar is [regular][</p>
+<p>] -- note that there are no recursive rules.</p>
+<p>[context free]: https://en.wikipedia.org/wiki/Context-free_grammar [regular</p>
+<p>]: https://en.wikipedia.org/wiki/Regular_grammar</p>
+<pre class="ebnf"><code>NUMBER         → DIGIT+ ( &quot;.&quot; DIGIT+ )? ;
+STRING         → &quot;\&quot;&quot; &lt;any char except &quot;\&quot;&quot;&gt;* &quot;\&quot;&quot; ;
+IDENTIFIER     → ALPHA ( ALPHA | DIGIT )* ;
+ALPHA          → &quot;a&quot; ... &quot;z&quot; | &quot;A&quot; ... &quot;Z&quot; | &quot;_&quot; ;
+DIGIT          → &quot;0&quot; ... &quot;9&quot; ;</code></pre>
+<p></p>

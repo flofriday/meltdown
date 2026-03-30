@@ -1,0 +1,273 @@
+<blockquote> &quot;Ah? A small aversion to menial labor?&quot; The doctor cocked an eyebrow.</blockquote><blockquote> &quot;Understandable, but misplaced. One should treasure those hum-drum</blockquote><blockquote> tasks that keep the body occupied but leave the mind and heart unfettered.&quot;</blockquote><blockquote></blockquote><blockquote> &lt;cite&gt;Tad Williams, &lt;em&gt;The Dragonbone Chair&lt;/em&gt;&lt;/cite&gt;</blockquote><p>Our little VM can represent three types of values right now: numbers, Booleans, and <code>nil</code>. Those types have two important things in common: they&#x27;re immutable and they&#x27;re small. Numbers are the largest, and they still fit into two 64-bit words. That&#x27;s a small enough price that we can afford to pay it for all values, even Booleans and nils which don&#x27;t need that much space.</p>
+<p>Strings, unfortunately, are not so petite. There&#x27;s no maximum length for a string. Even if we were to artificially cap it at some contrived limit like &lt;span name=&quot;pascal&quot;&gt;255&lt;/span&gt; characters, that&#x27;s still too much memory to spend on every single value.</p>
+<p>&lt;aside name=&quot;pascal&quot;&gt;</p>
+<p>UCSD Pascal, one of the first implementations of Pascal, had this exact limit. Instead of using a terminating null byte to indicate the end of the string like C, Pascal strings started with a length value. Since UCSD used only a single byte to store the length, strings couldn&#x27;t be any longer than 255 characters.</p>
+<p>&lt;img src=&quot;image/strings/pstring.png&quot; alt=&quot;The Pascal string &#x27;hello&#x27; with a length byte of 5 preceding it.&quot; /&gt;</p>
+<p>&lt;/aside&gt;</p>
+<p>We need a way to support values whose sizes vary, sometimes greatly. This is exactly what dynamic allocation on the heap is designed for. We can allocate as many bytes as we need. We get back a pointer that we&#x27;ll use to keep track of the value as it flows through the VM.</p>
+<h2>Values and Objects</h2>
+<p>Using the heap for larger, variable-sized values and the stack for smaller, atomic ones leads to a two-level representation. Every Lox value that you can store in a variable or return from an expression will be a Value. For small, fixed-size types like numbers, the payload is stored directly inside the Value struct itself.</p>
+<p>If the object is larger, its data lives on the heap. Then the Value&#x27;s payload is a <em>pointer</em> to that blob of memory. We&#x27;ll eventually have a handful of heap-allocated types in clox: strings, instances, functions, you get the idea. Each type has its own unique data, but there is also state they all share that [our future garbage collector][gc</p>
+<p>] will use to manage their memory.</p>
+<p>&lt;img src=&quot;image/strings/value.png&quot; class=&quot;wide&quot; alt=&quot;Field layout of number and obj values.&quot; /&gt;</p>
+<p>[gc]: garbage-collection.html</p>
+<p>We&#x27;ll call this common representation &lt;span name=&quot;short&quot;&gt;&quot;Obj&quot;&lt;/span&gt;. Each Lox value whose state lives on the heap is an Obj. We can thus use a single new ValueType case to refer to all heap-allocated types.</p>
+<p>&lt;aside name=&quot;short&quot;&gt;</p>
+<p>&quot;Obj&quot; is short for &quot;object&quot;, natch.</p>
+<p>&lt;/aside&gt;</p>
+<p>^code val-obj (1 before, 1 after)</p>
+<p>When a Value&#x27;s type is <code>VAL_OBJ</code>, the payload is a pointer to the heap memory, so we add another case to the union for that.</p>
+<p>^code union-object (1 before, 1 after)</p>
+<p>As we did with the other value types, we crank out a couple of helpful macros for working with Obj values.</p>
+<p>^code is-obj (1 before, 2 after)</p>
+<p>This evaluates to <code>true</code> if the given Value is an Obj. If so, we can use this:</p>
+<p>^code as-obj (2 before, 1 after)</p>
+<p>It extracts the Obj pointer from the value. We can also go the other way.</p>
+<p>^code obj-val (1 before, 2 after)</p>
+<p>This takes a bare Obj pointer and wraps it in a full Value.</p>
+<h2>Struct Inheritance</h2>
+<p>Every heap-allocated value is an Obj, but &lt;span name=&quot;objs&quot;&gt;Objs&lt;/span&gt; are not all the same. For strings, we need the array of characters. When we get to instances, they will need their data fields. A function object will need its chunk of bytecode. How do we handle different payloads and sizes? We can&#x27;t use another union like we did for Value since the sizes are all over the place.</p>
+<p>&lt;aside name=&quot;objs&quot;&gt;</p>
+<p>No, I don&#x27;t know how to pronounce &quot;objs&quot; either. Feels like there should be a vowel in there somewhere.</p>
+<p>&lt;/aside&gt;</p>
+<p>Instead, we&#x27;ll use another technique. It&#x27;s been around for ages, to the point that the C specification carves out specific support for it, but I don&#x27;t know that it has a canonical name. It&#x27;s an example of [<em>type punning</em>][pun</p>
+<p>], but that term is too broad. In the absence of any better ideas, I&#x27;ll call it <strong>struct inheritance</strong>, because it relies on structs and roughly follows how single-inheritance of state works in object-oriented languages.</p>
+<p>[pun]: https://en.wikipedia.org/wiki/Type_punning</p>
+<p>Like a tagged union, each Obj starts with a tag field that identifies what kind of object it is -- string, instance, etc. Following that are the payload fields. Instead of a union with cases for each type, each type is its own separate struct. The tricky part is how to treat these structs uniformly since C has no concept of inheritance or polymorphism. I&#x27;ll explain that soon, but first lets get the preliminary stuff out of the way.</p>
+<p>The name &quot;Obj&quot; itself refers to a struct that contains the state shared across all object types. It&#x27;s sort of like the &quot;base class&quot; for objects. Because of some cyclic dependencies between values and objects, we forward-declare it in the &quot;value&quot; module.</p>
+<p>^code forward-declare-obj (2 before, 1 after)</p>
+<p>And the actual definition is in a new module.</p>
+<p>^code object-h</p>
+<p>Right now, it contains only the type tag. Shortly, we&#x27;ll add some other bookkeeping information for memory management. The type enum is this:</p>
+<p>^code obj-type (1 before, 2 after)</p>
+<p>Obviously, that will be more useful in later chapters after we add more heap-allocated types. Since we&#x27;ll be accessing these tag types frequently, it&#x27;s worth making a little macro that extracts the object type tag from a given Value.</p>
+<p>^code obj-type-macro (1 before, 2 after)</p>
+<p>That&#x27;s our foundation.</p>
+<p>Now, let&#x27;s build strings on top of it. The payload for strings is defined in a separate struct. Again, we need to forward-declare it.</p>
+<p>^code forward-declare-obj-string (1 before, 2 after)</p>
+<p>The definition lives alongside Obj.</p>
+<p>^code obj-string (1 before, 2 after)</p>
+<p>A string object contains an array of characters. Those are stored in a separate, heap-allocated array so that we set aside only as much room as needed for each string. We also store the number of bytes in the array. This isn&#x27;t strictly necessary but lets us tell how much memory is allocated for the string without walking the character array to find the null terminator.</p>
+<p>Because ObjString is an Obj, it also needs the state all Objs share. It accomplishes that by having its first field be an Obj. C specifies that struct fields are arranged in memory in the order that they are declared. Also, when you nest structs, the inner struct&#x27;s fields are expanded right in place. So the memory for Obj and for ObjString looks like this:</p>
+<p>&lt;img src=&quot;image/strings/obj.png&quot; alt=&quot;The memory layout for the fields in Obj and ObjString.&quot; /&gt;</p>
+<p>Note how the first bytes of ObjString exactly line up with Obj. This is not a coincidence -- C &lt;span name=&quot;spec&quot;&gt;mandates&lt;/span&gt; it. This is designed to enable a clever pattern: You can take a pointer to a struct and safely convert it to a pointer to its first field and back.</p>
+<p>&lt;aside name=&quot;spec&quot;&gt;</p>
+<p>The key part of the spec is:</p>
+<blockquote> &amp;sect; 6.7.2.1 13</blockquote><blockquote></blockquote><blockquote> Within a structure object, the non-bit-field members and the units in which</blockquote><blockquote> bit-fields reside have addresses that increase in the order in which they</blockquote><blockquote> are declared. A pointer to a structure object, suitably converted, points to</blockquote><blockquote> its initial member (or if that member is a bit-field, then to the unit in</blockquote><blockquote> which it resides), and vice versa. There may be unnamed padding within a</blockquote><blockquote> structure object, but not at its beginning.</blockquote><p>&lt;/aside&gt;</p>
+<p>Given an <code>ObjString*</code>, you can safely cast it to <code>Obj*</code> and then access the <code>type</code> field from it. Every ObjString &quot;is&quot; an Obj in the OOP sense of &quot;is&quot;. When we later add other object types, each struct will have an Obj as its first field. Any code that wants to work with all objects can treat them as base <code>Obj*</code> and ignore any other fields that may happen to follow.</p>
+<p>You can go in the other direction too. Given an <code>Obj*</code>, you can &quot;downcast&quot; it to an <code>ObjString*</code>. Of course, you need to ensure that the <code>Obj*</code> pointer you have does point to the <code>obj</code> field of an actual ObjString. Otherwise, you are unsafely reinterpreting random bits of memory. To detect that such a cast is safe, we add another macro.</p>
+<p>^code is-string (1 before, 2 after)</p>
+<p>It takes a Value, not a raw <code>Obj*</code> because most code in the VM works with Values. It relies on this inline function:</p>
+<p>^code is-obj-type (2 before, 2 after)</p>
+<p>Pop quiz: Why not just put the body of this function right in the macro? What&#x27;s different about this one compared to the others? Right, it&#x27;s because the body uses <code>value</code> twice. A macro is expanded by inserting the argument <em>expression</em> every place the parameter name appears in the body. If a macro uses a parameter more than once, that expression gets evaluated multiple times.</p>
+<p>That&#x27;s bad if the expression has side effects. If we put the body of <code>isObjType()</code> into the macro definition and then you did, say,</p>
+<pre class="c"><code>IS_STRING(POP())</code></pre>
+<p>then it would pop two values off the stack! Using a function fixes that.</p>
+<p>As long as we ensure that we set the type tag correctly whenever we create an Obj of some type, this macro will tell us when it&#x27;s safe to cast a value to a specific object type. We can do that using these:</p>
+<p>^code as-string (1 before, 2 after)</p>
+<p>These two macros take a Value that is expected to contain a pointer to a valid ObjString on the heap. The first one returns the <code>ObjString*</code> pointer. The second one steps through that to return the character array itself, since that&#x27;s often what we&#x27;ll end up needing.</p>
+<h2>Strings</h2>
+<p>OK, our VM can now represent string values. It&#x27;s time to add strings to the language itself. As usual, we begin in the front end. The lexer already tokenizes string literals, so it&#x27;s the parser&#x27;s turn.</p>
+<p>^code table-string (1 before, 1 after)</p>
+<p>When the parser hits a string token, it calls this parse function:</p>
+<p>^code parse-string</p>
+<p>This takes the string&#x27;s characters &lt;span name=&quot;escape&quot;&gt;directly&lt;/span&gt; from the lexeme. The <code>+ 1</code> and <code>- 2</code> parts trim the leading and trailing quotation marks. It then creates a string object, wraps it in a Value, and stuffs it into the constant table.</p>
+<p>&lt;aside name=&quot;escape&quot;&gt;</p>
+<p>If Lox supported string escape sequences like <code>\n</code>, we&#x27;d translate those here. Since it doesn&#x27;t, we can take the characters as they are.</p>
+<p>&lt;/aside&gt;</p>
+<p>To create the string, we use <code>copyString()</code>, which is declared in <code>object.h</code>.</p>
+<p>^code copy-string-h (2 before, 1 after)</p>
+<p>The compiler module needs to include that.</p>
+<p>^code compiler-include-object (2 before, 1 after)</p>
+<p>Our &quot;object&quot; module gets an implementation file where we define the new function.</p>
+<p>^code object-c</p>
+<p>First, we allocate a new array on the heap, just big enough for the string&#x27;s characters and the trailing &lt;span name=&quot;terminator&quot;&gt;terminator&lt;/span&gt;, using this low-level macro that allocates an array with a given element type and count:</p>
+<p>^code allocate (2 before, 1 after)</p>
+<p>Once we have the array, we copy over the characters from the lexeme and terminate it.</p>
+<p>&lt;aside name=&quot;terminator&quot; class=&quot;bottom&quot;&gt;</p>
+<p>We need to terminate the string ourselves because the lexeme points at a range of characters inside the monolithic source string and isn&#x27;t terminated.</p>
+<p>Since ObjString stores the length explicitly, we <em>could</em> leave the character array unterminated, but slapping a terminator on the end costs us only a byte and lets us pass the character array to C standard library functions that expect a terminated string.</p>
+<p>&lt;/aside&gt;</p>
+<p>You might wonder why the ObjString can&#x27;t just point back to the original characters in the source string. Some ObjStrings will be created dynamically at runtime as a result of string operations like concatenation. Those strings obviously need to dynamically allocate memory for the characters, which means the string needs to <em>free</em> that memory when it&#x27;s no longer needed.</p>
+<p>If we had an ObjString for a string literal, and tried to free its character array that pointed into the original source code string, bad things would happen. So, for literals, we preemptively copy the characters over to the heap. This way, every ObjString reliably owns its character array and can free it.</p>
+<p>The real work of creating a string object happens in this function:</p>
+<p>^code allocate-string (2 before)</p>
+<p>It creates a new ObjString on the heap and then initializes its fields. It&#x27;s sort of like a constructor in an OOP language. As such, it first calls the &quot;base class&quot; constructor to initialize the Obj state, using a new macro.</p>
+<p>^code allocate-obj (1 before, 2 after)</p>
+<p>&lt;span name=&quot;factored&quot;&gt;Like&lt;/span&gt; the previous macro, this exists mainly to avoid the need to redundantly cast a <code>void*</code> back to the desired type. The actual functionality is here:</p>
+<p>&lt;aside name=&quot;factored&quot;&gt;</p>
+<p>I admit this chapter has a sea of helper functions and macros to wade through. I try to keep the code nicely factored, but that leads to a scattering of tiny functions. They will pay off when we reuse them later.</p>
+<p>&lt;/aside&gt;</p>
+<p>^code allocate-object (2 before, 2 after)</p>
+<p>It allocates an object of the given size on the heap. Note that the size is <em>not</em> just the size of Obj itself. The caller passes in the number of bytes so that there is room for the extra payload fields needed by the specific object type being created.</p>
+<p>Then it initializes the Obj state -- right now, that&#x27;s just the type tag. This function returns to <code>allocateString()</code>, which finishes initializing the ObjString fields. &lt;span name=&quot;viola&quot;&gt;<em>Voilà</em>&lt;/span&gt;, we can compile and execute string literals.</p>
+<p>&lt;aside name=&quot;viola&quot;&gt;</p>
+<p>&lt;img src=&quot;image/strings/viola.png&quot; class=&quot;above&quot; alt=&quot;A viola.&quot; /&gt;</p>
+<p>Don&#x27;t get &quot;voilà&quot; confused with &quot;viola&quot;. One means &quot;there it is&quot; and the other is a string instrument, the middle child between a violin and a cello. Yes, I did spend two hours drawing a viola just to mention that.</p>
+<p>&lt;/aside&gt;</p>
+<h2>Operations on Strings</h2>
+<p>Our fancy strings are there, but they don&#x27;t do much of anything yet. A good first step is to make the existing print code not barf on the new value type.</p>
+<p>^code call-print-object (1 before, 1 after)</p>
+<p>If the value is a heap-allocated object, it defers to a helper function over in the &quot;object&quot; module.</p>
+<p>^code print-object-h (1 before, 2 after)</p>
+<p>The implementation looks like this:</p>
+<p>^code print-object</p>
+<p>We have only a single object type now, but this function will sprout additional switch cases in later chapters. For string objects, it simply &lt;span name=&quot;term-2&quot;&gt;prints&lt;/span&gt; the character array as a C string.</p>
+<p>&lt;aside name=&quot;term-2&quot;&gt;</p>
+<p>I told you terminating the string would come in handy.</p>
+<p>&lt;/aside&gt;</p>
+<p>The equality operators also need to gracefully handle strings. Consider:</p>
+<pre class="lox"><code>&quot;string&quot; == &quot;string&quot;</code></pre>
+<p>These are two separate string literals. The compiler will make two separate calls to <code>copyString()</code>, create two distinct ObjString objects and store them as two constants in the chunk. They are different objects in the heap. But our users (and thus we) expect strings to have value equality. The above expression should evaluate to <code>true</code>. That requires a little special support.</p>
+<p>^code strings-equal (1 before, 1 after)</p>
+<p>If the two values are both strings, then they are equal if their character arrays contain the same characters, regardless of whether they are two separate objects or the exact same one. This does mean that string equality is slower than equality on other types since it has to walk the whole string. We&#x27;ll revise that [later][hash</p>
+<p>], but this gives us the right semantics for now.</p>
+<p>[hash]: hash-tables.html</p>
+<p>Finally, in order to use <code>memcmp()</code> and the new stuff in the &quot;object&quot; module, we need a couple of includes. Here:</p>
+<p>^code value-include-string (1 before, 2 after)</p>
+<p>And here:</p>
+<p>^code value-include-object (2 before, 1 after)</p>
+<h3>Concatenation</h3>
+<p>Full-grown languages provide lots of operations for working with strings -- access to individual characters, the string&#x27;s length, changing case, splitting, joining, searching, etc. When you implement your language, you&#x27;ll likely want all that. But for this book, we keep things <em>very</em> minimal.</p>
+<p>The only interesting operation we support on strings is <code>+</code>. If you use that operator on two string objects, it produces a new string that&#x27;s a concatenation of the two operands. Since Lox is dynamically typed, we can&#x27;t tell which behavior is needed at compile time because we don&#x27;t know the types of the operands until runtime. Thus, the <code>OP_ADD</code> instruction dynamically inspects the operands and chooses the right operation.</p>
+<p>^code add-strings (1 before, 1 after)</p>
+<p>If both operands are strings, it concatenates. If they&#x27;re both numbers, it adds them. Any other &lt;span name=&quot;convert&quot;&gt;combination&lt;/span&gt; of operand types is a runtime error.</p>
+<p>&lt;aside name=&quot;convert&quot; class=&quot;bottom&quot;&gt;</p>
+<p>This is more conservative than most languages. In other languages, if one operand is a string, the other can be any type and it will be implicitly converted to a string before concatenating the two.</p>
+<p>I think that&#x27;s a fine feature, but would require writing tedious &quot;convert to string&quot; code for each type, so I left it out of Lox.</p>
+<p>&lt;/aside&gt;</p>
+<p>To concatenate strings, we define a new function.</p>
+<p>^code concatenate</p>
+<p>It&#x27;s pretty verbose, as C code that works with strings tends to be. First, we calculate the length of the result string based on the lengths of the operands. We allocate a character array for the result and then copy the two halves in. As always, we carefully ensure the string is terminated.</p>
+<p>In order to call <code>memcpy()</code>, the VM needs an include.</p>
+<p>^code vm-include-string (1 before, 2 after)</p>
+<p>Finally, we produce an ObjString to contain those characters. This time we use a new function, <code>takeString()</code>.</p>
+<p>^code take-string-h (2 before, 1 after)</p>
+<p>The implementation looks like this:</p>
+<p>^code take-string</p>
+<p>The previous <code>copyString()</code> function assumes it <em>cannot</em> take ownership of the characters you pass in. Instead, it conservatively creates a copy of the characters on the heap that the ObjString can own. That&#x27;s the right thing for string literals where the passed-in characters are in the middle of the source string.</p>
+<p>But, for concatenation, we&#x27;ve already dynamically allocated a character array on the heap. Making another copy of that would be redundant (and would mean <code>concatenate()</code> has to remember to free its copy). Instead, this function claims ownership of the string you give it.</p>
+<p>As usual, stitching this functionality together requires a couple of includes.</p>
+<p>^code vm-include-object-memory (1 before, 1 after)</p>
+<h2>Freeing Objects</h2>
+<p>Behold this innocuous-seeming expression:</p>
+<pre class="lox"><code>&quot;st&quot; + &quot;ri&quot; + &quot;ng&quot;</code></pre>
+<p>When the compiler chews through this, it allocates an ObjString for each of those three string literals and stores them in the chunk&#x27;s constant table and generates this &lt;span name=&quot;stack&quot;&gt;bytecode&lt;/span&gt;:</p>
+<p>&lt;aside name=&quot;stack&quot;&gt;</p>
+<p>Here&#x27;s what the stack looks like after each instruction:</p>
+<p>&lt;img src=&quot;image/strings/stack.png&quot; alt=&quot;The state of the stack at each instruction.&quot; /&gt;</p>
+<p>&lt;/aside&gt;</p>
+<pre class="text"><code>0000    OP_CONSTANT         0 &quot;st&quot;
+0002    OP_CONSTANT         1 &quot;ri&quot;
+0004    OP_ADD
+0005    OP_CONSTANT         2 &quot;ng&quot;
+0007    OP_ADD
+0008    OP_RETURN</code></pre>
+<p>The first two instructions push <code>&quot;st&quot;</code> and <code>&quot;ri&quot;</code> onto the stack. Then the <code>OP_ADD</code> pops those and concatenates them. That dynamically allocates a new <code>&quot;stri&quot;</code> string on the heap. The VM pushes that and then pushes the <code>&quot;ng&quot;</code> constant. The last <code>OP_ADD</code> pops <code>&quot;stri&quot;</code> and <code>&quot;ng&quot;</code>, concatenates them, and pushes the result: <code>&quot;string&quot;</code>. Great, that&#x27;s what we expect.</p>
+<p>But, wait. What happened to that <code>&quot;stri&quot;</code> string? We dynamically allocated it, then the VM discarded it after concatenating it with <code>&quot;ng&quot;</code>. We popped it from the stack and no longer have a reference to it, but we never freed its memory. We&#x27;ve got ourselves a classic memory leak.</p>
+<p>Of course, it&#x27;s perfectly fine for the <em>Lox program</em> to forget about intermediate strings and not worry about freeing them. Lox automatically manages memory on the user&#x27;s behalf. The responsibility to manage memory doesn&#x27;t <em>disappear</em>. Instead, it falls on our shoulders as VM implementers.</p>
+<p>The full &lt;span name=&quot;borrowed&quot;&gt;solution&lt;/span&gt; is a [garbage collector][gc</p>
+<p>] that reclaims unused memory while the program is running. We&#x27;ve got some other stuff to get in place before we&#x27;re ready to tackle that project. Until then, we are living on borrowed time. The longer we wait to add the collector, the harder it is to do.</p>
+<p>&lt;aside name=&quot;borrowed&quot;&gt;</p>
+<p>I&#x27;ve seen a number of people implement large swathes of their language before trying to start on the GC. For the kind of toy programs you typically run while a language is being developed, you actually don&#x27;t run out of memory before reaching the end of the program, so this gets you surprisingly far.</p>
+<p>But that underestimates how <em>hard</em> it is to add a garbage collector later. The collector <em>must</em> ensure it can find every bit of memory that <em>is</em> still being used so that it doesn&#x27;t collect live data. There are hundreds of places a language implementation can squirrel away a reference to some object. If you don&#x27;t find all of them, you get nightmarish bugs.</p>
+<p>I&#x27;ve seen language implementations die because it was too hard to get the GC in later. If your language needs GC, get it working as soon as you can. It&#x27;s a crosscutting concern that touches the entire codebase.</p>
+<p>&lt;/aside&gt;</p>
+<p>Today, we should at least do the bare minimum: avoid <em>leaking</em> memory by making sure the VM can still find every allocated object even if the Lox program itself no longer references them. There are many sophisticated techniques that advanced memory managers use to allocate and track memory for objects. We&#x27;re going to take the simplest practical approach.</p>
+<p>We&#x27;ll create a linked list that stores every Obj. The VM can traverse that list to find every single object that has been allocated on the heap, whether or not the user&#x27;s program or the VM&#x27;s stack still has a reference to it.</p>
+<p>We could define a separate linked list node struct but then we&#x27;d have to allocate those too. Instead, we&#x27;ll use an <strong>intrusive list</strong> -- the Obj struct itself will be the linked list node. Each Obj gets a pointer to the next Obj in the chain.</p>
+<p>^code next-field (2 before, 1 after)</p>
+<p>The VM stores a pointer to the head of the list.</p>
+<p>^code objects-root (1 before, 1 after)</p>
+<p>When we first initialize the VM, there are no allocated objects.</p>
+<p>^code init-objects-root (1 before, 1 after)</p>
+<p>Every time we allocate an Obj, we insert it in the list.</p>
+<p>^code add-to-list (1 before, 1 after)</p>
+<p>Since this is a singly linked list, the easiest place to insert it is as the head. That way, we don&#x27;t need to also store a pointer to the tail and keep it updated.</p>
+<p>The &quot;object&quot; module is directly using the global <code>vm</code> variable from the &quot;vm&quot; module, so we need to expose that externally.</p>
+<p>^code extern-vm (2 before, 1 after)</p>
+<p>Eventually, the garbage collector will free memory while the VM is still running. But, even then, there will usually be unused objects still lingering in memory when the user&#x27;s program completes. The VM should free those too.</p>
+<p>There&#x27;s no sophisticated logic for that. Once the program is done, we can free <em>every</em> object. We can and should implement that now.</p>
+<p>^code call-free-objects (1 before, 1 after)</p>
+<p>That empty function we defined [way back when][vm</p>
+<p>] finally does something! It calls this:</p>
+<p>[vm]: a-virtual-machine.html#an-instruction-execution-machine</p>
+<p>^code free-objects-h (1 before, 2 after)</p>
+<p>Here&#x27;s how we free the objects:</p>
+<p>^code free-objects</p>
+<p>This is a CS 101 textbook implementation of walking a linked list and freeing its nodes. For each node, we call:</p>
+<p>^code free-object</p>
+<p>We aren&#x27;t only freeing the Obj itself. Since some object types also allocate other memory that they own, we also need a little type-specific code to handle each object type&#x27;s special needs. Here, that means we free the character array and then free the ObjString. Those both use one last memory management macro.</p>
+<p>^code free (1 before, 2 after)</p>
+<p>It&#x27;s a tiny &lt;span name=&quot;free&quot;&gt;wrapper&lt;/span&gt; around <code>reallocate()</code> that &quot;resizes&quot; an allocation down to zero bytes.</p>
+<p>&lt;aside name=&quot;free&quot;&gt;</p>
+<p>Using <code>reallocate()</code> to free memory might seem pointless. Why not just call <code>free()</code>? Later, this will help the VM track how much memory is still being used. If all allocation and freeing goes through <code>reallocate()</code>, it&#x27;s easy to keep a running count of the number of bytes of allocated memory.</p>
+<p>&lt;/aside&gt;</p>
+<p>As usual, we need an include to wire everything together.</p>
+<p>^code memory-include-object (1 before, 2 after)</p>
+<p>Then in the implementation file:</p>
+<p>^code memory-include-vm (1 before, 2 after)</p>
+<p>With this, our VM no longer leaks memory. Like a good C program, it cleans up its mess before exiting. But it doesn&#x27;t free any objects while the VM is running. Later, when it&#x27;s possible to write longer-running Lox programs, the VM will eat more and more memory as it goes, not relinquishing a single byte until the entire program is done.</p>
+<p>We won&#x27;t address that until we&#x27;ve added [a real garbage collector][gc</p>
+<p>], but this is a big step. We now have the infrastructure to support a variety of different kinds of dynamically allocated objects. And we&#x27;ve used that to add strings to clox, one of the most used types in most programming languages. Strings in turn enable us to build another fundamental data type, especially in dynamic languages: the venerable [hash table][</p>
+<p>]. But that&#x27;s for the next chapter...</p>
+<p>[hash table]: hash-tables.html</p>
+<p>&lt;div class=&quot;challenges&quot;&gt;</p>
+<h2>Challenges</h2>
+<p>1.  Each string requires two separate dynamic allocations -- one for the     ObjString and a second for the character array. Accessing the characters     from a value requires two pointer indirections, which can be bad for     performance. A more efficient solution relies on a technique called     **[flexible array members][</p>
+<p>]**. Use that to store the ObjString and its     character array in a single contiguous allocation.</p>
+<p>2.  When we create the ObjString for each string literal, we copy the characters     onto the heap. That way, when the string is later freed, we know it is safe     to free the characters too.</p>
+<p>    This is a simpler approach but wastes some memory, which might be a problem     on very constrained devices. Instead, we could keep track of which     ObjStrings own their character array and which are &quot;constant strings&quot; that     just point back to the original source string or some other non-freeable     location. Add support for this.</p>
+<p>3.  If Lox was your language, what would you have it do when a user tries to use     <code>+</code> with one string operand and the other some other type? Justify your     choice. What do other languages do?</p>
+<p>[flexible array members]: https://en.wikipedia.org/wiki/Flexible_array_member</p>
+<p>&lt;/div&gt;</p>
+<p>&lt;div class=&quot;design-note&quot;&gt;</p>
+<h2>Design Note: String Encoding</h2>
+<p>In this book, I try not to shy away from the gnarly problems you&#x27;ll run into in a real language implementation. We might not always use the most <em>sophisticated</em> solution -- it&#x27;s an intro book after all -- but I don&#x27;t think it&#x27;s honest to pretend the problem doesn&#x27;t exist at all. However, I did skirt around one really nasty conundrum: deciding how to represent strings.</p>
+<p>There are two facets to a string encoding:</p>
+<ul>
+<li>  <strong>What is a single &quot;character&quot; in a string?</strong> How many different values are</li>
+</ul>
+<p>    there and what do they represent? The first widely adopted standard answer     to this was [ASCII][</p>
+<p>]. It gave you 127 different character values and     specified what they were. It was great... if you only ever cared about     English. While it has weird, mostly forgotten characters like &quot;record     separator&quot; and &quot;synchronous idle&quot;, it doesn&#x27;t have a single umlaut, acute,     or grave. It can&#x27;t represent &quot;jalapeño&quot;, &quot;naïve&quot;, &lt;span     name=&quot;gruyere&quot;&gt;&quot;Gruyère&quot;&lt;/span&gt;, or &quot;Mötley Crüe&quot;.</p>
+<p>    &lt;aside name=&quot;gruyere&quot;&gt;</p>
+<p>    It goes without saying that a language that does not let one discuss Gruyère     or Mötley Crüe is a language not worth using.</p>
+<p>    &lt;/aside&gt;</p>
+<p>    Next came [Unicode][</p>
+<p>]. Initially, it supported 16,384 different characters     (<strong>code points</strong>), which fit nicely in 16 bits with a couple of bits to     spare. Later that grew and grew, and now there are well over 100,000     different code points including such vital instruments of human     communication as 💩 (Unicode Character &#x27;PILE OF POO&#x27;, <code>U+1F4A9</code>).</p>
+<p>    Even that long list of code points is not enough to represent each possible     visible glyph a language might support. To handle that, Unicode also has     <strong>combining characters</strong> that modify a preceding code point. For example,     &quot;a&quot; followed by the combining character &quot;¨&quot; gives you &quot;ä&quot;. (To make things     more confusing Unicode <em>also</em> has a single code point that looks like &quot;ä&quot;.)</p>
+<p>    If a user accesses the fourth &quot;character&quot; in &quot;naïve&quot;, do they expect to get     back &quot;v&quot; or &amp;ldquo;¨&amp;rdquo;? The former means they are thinking of each code     point and its combining character as a single unit -- what Unicode calls an     <strong>extended grapheme cluster</strong> -- the latter means they are thinking in     individual code points. Which do your users expect?</p>
+<ul>
+<li>  <strong>How is a single unit represented in memory?</strong> Most systems using ASCII</li>
+</ul>
+<p>    gave a single byte to each character and left the high bit unused. Unicode     has a handful of common encodings. UTF-16 packs most code points into 16     bits. That was great when every code point fit in that size. When that     overflowed, they added <em>surrogate pairs</em> that use multiple 16-bit code units     to represent a single code point. UTF-32 is the next evolution of     UTF-16 -- it gives a full 32 bits to each and every code point.</p>
+<p>    UTF-8 is more complex than either of those. It uses a variable number of     bytes to encode a code point. Lower-valued code points fit in fewer bytes.     Since each character may occupy a different number of bytes, you can&#x27;t     directly index into the string to find a specific code point. If you want,     say, the 10th code point, you don&#x27;t know how many bytes into the string that     is without walking and decoding all of the preceding ones.</p>
+<p>[ascii]: https://en.wikipedia.org/wiki/ASCII [unicode</p>
+<p>]: https://en.wikipedia.org/wiki/Unicode</p>
+<p>Choosing a character representation and encoding involves fundamental trade-offs. Like many things in engineering, there&#x27;s no &lt;span name=&quot;python&quot;&gt;perfect&lt;/span&gt; solution:</p>
+<p>&lt;aside name=&quot;python&quot;&gt;</p>
+<p>An example of how difficult this problem is comes from Python. The achingly long transition from Python 2 to 3 is painful mostly because of its changes around string encoding.</p>
+<p>&lt;/aside&gt;</p>
+<ul>
+<li>  ASCII is memory efficient and fast, but it kicks non-Latin languages to the</li>
+</ul>
+<p>    side.</p>
+<ul>
+<li>  UTF-32 is fast and supports the whole Unicode range, but wastes a lot of</li>
+</ul>
+<p>    memory given that most code points do tend to be in the lower range of     values, where a full 32 bits aren&#x27;t needed.</p>
+<ul>
+<li>  UTF-8 is memory efficient and supports the whole Unicode range, but its</li>
+</ul>
+<p>    variable-length encoding makes it slow to access arbitrary code points.</p>
+<ul>
+<li>  UTF-16 is worse than all of them -- an ugly consequence of Unicode</li>
+</ul>
+<p>    outgrowing its earlier 16-bit range. It&#x27;s less memory efficient than UTF-8     but is still a variable-length encoding thanks to surrogate pairs. Avoid it     if you can. Alas, if your language needs to run on or interoperate with the     browser, the JVM, or the CLR, you might be stuck with it, since those all     use UTF-16 for their strings and you don&#x27;t want to have to convert every     time you pass a string to the underlying system.</p>
+<p>One option is to take the maximal approach and do the &quot;rightest&quot; thing. Support all the Unicode code points. Internally, select an encoding for each string based on its contents -- use ASCII if every code point fits in a byte, UTF-16 if there are no surrogate pairs, etc. Provide APIs to let users iterate over both code points and extended grapheme clusters.</p>
+<p>This covers all your bases but is really complex. It&#x27;s a lot to implement, debug, and optimize. When serializing strings or interoperating with other systems, you have to deal with all of the encodings. Users need to understand the two indexing APIs and know which to use when. This is the approach that newer, big languages tend to take -- like Raku and Swift.</p>
+<p>A simpler compromise is to always encode using UTF-8 and only expose an API that works with code points. For users that want to work with grapheme clusters, let them use a third-party library for that. This is less Latin-centric than ASCII but not much more complex. You lose fast direct indexing by code point, but you can usually live without that or afford to make it <em>O(n)</em> instead of <em>O(1)</em>.</p>
+<p>If I were designing a big workhorse language for people writing large applications, I&#x27;d probably go with the maximal approach. For my little embedded scripting language [Wren][</p>
+<p>], I went with UTF-8 and code points.</p>
+<p>[wren]: http://wren.io</p>
+<p>&lt;/div&gt; </p>

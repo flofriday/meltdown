@@ -1,0 +1,72 @@
+<p>For your edification, here is the code produced by [the little script we built][generator</p>
+<p>] to automate generating the syntax tree classes for jlox.</p>
+<p>[generator]: representing-code.html#metaprogramming-the-trees</p>
+<h2>Expressions</h2>
+<p>Expressions are the first syntax tree nodes we see, introduced in &quot;<a href="representing-code.html">Representing Code</a>&quot;. The main Expr class defines the visitor interface used to dispatch against the specific expression types, and contains the other expression subclasses as nested classes.</p>
+<p>^code expr</p>
+<h3>Assign expression</h3>
+<p>Variable assignment is introduced in &quot;<a href="statements-and-state.html#assignment">Statements and State</a>&quot;.</p>
+<p>^code expr-assign</p>
+<h3>Binary expression</h3>
+<p>Binary operators are introduced in &quot;<a href="representing-code.html">Representing Code</a>&quot;.</p>
+<p>^code expr-binary</p>
+<h3>Call expression</h3>
+<p>Function call expressions are introduced in &quot;<a href="functions.html#function-calls">Functions</a>&quot;.</p>
+<p>^code expr-call</p>
+<h3>Get expression</h3>
+<p>Property access, or &quot;get&quot; expressions are introduced in &quot;<a href="classes.html#properties-on-instances">Classes</a>&quot;.</p>
+<p>^code expr-get</p>
+<h3>Grouping expression</h3>
+<p>Using parentheses to group expressions is introduced in &quot;<a href="representing-code.html">Representing Code</a>&quot;.</p>
+<p>^code expr-grouping</p>
+<h3>Literal expression</h3>
+<p>Literal value expressions are introduced in &quot;<a href="representing-code.html">Representing Code</a>&quot;.</p>
+<p>^code expr-literal</p>
+<h3>Logical expression</h3>
+<p>The logical <code>and</code> and <code>or</code> operators are introduced in &quot;<a href="control-flow.html#logical-operators">Control Flow</a>&quot;.</p>
+<p>^code expr-logical</p>
+<h3>Set expression</h3>
+<p>Property assignment, or &quot;set&quot; expressions are introduced in &quot;<a href="classes.html#properties-on-instances">Classes</a>&quot;.</p>
+<p>^code expr-set</p>
+<h3>Super expression</h3>
+<p>The <code>super</code> expression is introduced in &quot;<a href="inheritance.html#calling-superclass-methods">Inheritance</a>&quot;.</p>
+<p>^code expr-super</p>
+<h3>This expression</h3>
+<p>The <code>this</code> expression is introduced in &quot;<a href="classes.html#this">Classes</a>&quot;.</p>
+<p>^code expr-this</p>
+<h3>Unary expression</h3>
+<p>Unary operators are introduced in &quot;<a href="representing-code.html">Representing Code</a>&quot;.</p>
+<p>^code expr-unary</p>
+<h3>Variable expression</h3>
+<p>Variable access expressions are introduced in &quot;<a href="statements-and-state.html#variable-syntax">Statements and State</a>&quot;.</p>
+<p>^code expr-variable</p>
+<h2>Statements</h2>
+<p>Statements form a second hierarchy of syntax tree nodes independent of expressions. We add the first couple of them in &quot;<a href="statements-and-state.html">Statements and State</a>&quot;.</p>
+<p>^code stmt</p>
+<h3>Block statement</h3>
+<p>The curly-braced block statement that defines a local scope is introduced in &quot;<a href="statements-and-state.html#block-syntax-and-semantics">Statements and State</a>&quot;.</p>
+<p>^code stmt-block</p>
+<h3>Class statement</h3>
+<p>Class declarations are introduced in, unsurprisingly, &quot;<a href="classes.html#class-declarations">Classes</a>&quot;.</p>
+<p>^code stmt-class</p>
+<h3>Expression statement</h3>
+<p>The expression statement is introduced in &quot;<a href="statements-and-state.html#statements">Statements and State</a>&quot;.</p>
+<p>^code stmt-expression</p>
+<h3>Function statement</h3>
+<p>Function declarations are introduced in, you guessed it, &quot;<a href="functions.html#function-declarations">Functions</a>&quot;.</p>
+<p>^code stmt-function</p>
+<h3>If statement</h3>
+<p>The <code>if</code> statement is introduced in &quot;<a href="control-flow.html#conditional-execution">Control Flow</a>&quot;.</p>
+<p>^code stmt-if</p>
+<h3>Print statement</h3>
+<p>The <code>print</code> statement is introduced in &quot;<a href="statements-and-state.html#statements">Statements and State</a>&quot;.</p>
+<p>^code stmt-print</p>
+<h3>Return statement</h3>
+<p>You need a function to return from, so <code>return</code> statements are introduced in &quot;<a href="functions.html#return-statements">Functions</a>&quot;.</p>
+<p>^code stmt-return</p>
+<h3>Variable statement</h3>
+<p>Variable declarations are introduced in &quot;<a href="statements-and-state.html#variable-syntax">Statements and State</a>&quot;.</p>
+<p>^code stmt-var</p>
+<h3>While statement</h3>
+<p>The <code>while</code> statement is introduced in &quot;<a href="control-flow.html#while-loops">Control Flow</a>&quot;.</p>
+<p>^code stmt-while </p>

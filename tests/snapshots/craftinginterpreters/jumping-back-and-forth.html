@@ -1,0 +1,280 @@
+<blockquote> The order that our mind imagines is like a net, or like a ladder, built to</blockquote><blockquote> attain something. But afterward you must throw the ladder away, because you</blockquote><blockquote> discover that, even if it was useful, it was meaningless.</blockquote><blockquote></blockquote><blockquote> &lt;cite&gt;Umberto Eco, &lt;em&gt;The Name of the Rose&lt;/em&gt;&lt;/cite&gt;</blockquote><p>It&#x27;s taken a while to get here, but we&#x27;re finally ready to add control flow to our virtual machine. In the tree-walk interpreter we built for jlox, we implemented Lox&#x27;s control flow in terms of Java&#x27;s. To execute a Lox <code>if</code> statement, we used a Java <code>if</code> statement to run the chosen branch. That works, but isn&#x27;t entirely satisfying. By what magic does the <em>JVM itself</em> or a native CPU implement <code>if</code> statements? Now that we have our own bytecode VM to hack on, we can answer that.</p>
+<p>When we talk about &quot;control flow&quot;, what are we referring to? By &quot;flow&quot; we mean the way execution moves through the text of the program. Almost like there is a little robot inside the computer wandering through our code, executing bits and pieces here and there. Flow is the path that robot takes, and by <em>controlling</em> the robot, we drive which pieces of code it executes.</p>
+<p>In jlox, the robot&#x27;s locus of attention -- the <em>current</em> bit of code -- was implicit based on which AST nodes were stored in various Java variables and what Java code we were in the middle of running. In clox, it is much more explicit. The VM&#x27;s <code>ip</code> field stores the address of the current bytecode instruction. The value of that field is exactly &quot;where we are&quot; in the program.</p>
+<p>Execution proceeds normally by incrementing the <code>ip</code>. But we can mutate that variable however we want to. In order to implement control flow, all that&#x27;s necessary is to change the <code>ip</code> in more interesting ways. The simplest control flow construct is an <code>if</code> statement with no <code>else</code> clause:</p>
+<pre class="lox"><code>if (condition) print(&quot;condition was truthy&quot;);</code></pre>
+<p>The VM evaluates the bytecode for the condition expression. If the result is truthy, then it continues along and executes the <code>print</code> statement in the body. The interesting case is when the condition is falsey. When that happens, execution skips over the then branch and proceeds to the next statement.</p>
+<p>To skip over a chunk of code, we simply set the <code>ip</code> field to the address of the bytecode instruction following that code. To <em>conditionally</em> skip over some code, we need an instruction that looks at the value on top of the stack. If it&#x27;s falsey, it adds a given offset to the <code>ip</code> to jump over a range of instructions. Otherwise, it does nothing and lets execution proceed to the next instruction as usual.</p>
+<p>When we compile to bytecode, the explicit nested block structure of the code evaporates, leaving only a flat series of instructions behind. Lox is a [structured programming][</p>
+<p>] language, but clox bytecode isn&#x27;t. The right -- or wrong, depending on how you look at it -- set of bytecode instructions could jump into the middle of a block, or from one scope into another.</p>
+<p>The VM will happily execute that, even if the result leaves the stack in an unknown, inconsistent state. So even though the bytecode is unstructured, we&#x27;ll take care to ensure that our compiler only generates clean code that maintains the same structure and nesting that Lox itself does.</p>
+<p>This is exactly how real CPUs behave. Even though we might program them using higher-level languages that mandate structured control flow, the compiler lowers that down to raw jumps. At the bottom, it turns out goto is the only real control flow.</p>
+<p>[structured programming]: https://en.wikipedia.org/wiki/Structured_programming</p>
+<p>Anyway, I didn&#x27;t mean to get all philosophical. The important bit is that if we have that one conditional jump instruction, that&#x27;s enough to implement Lox&#x27;s <code>if</code> statement, as long as it doesn&#x27;t have an <code>else</code> clause. So let&#x27;s go ahead and get started with that.</p>
+<h2>If Statements</h2>
+<p>This many chapters in, you know the drill. Any new feature starts in the front end and works its way through the pipeline. An <code>if</code> statement is, well, a statement, so that&#x27;s where we hook it into the parser.</p>
+<p>^code parse-if (2 before, 1 after)</p>
+<p>When we see an <code>if</code> keyword, we hand off compilation to this function:</p>
+<p>^code if-statement</p>
+<p>&lt;aside name=&quot;paren&quot;&gt;</p>
+<p>Have you ever noticed that the <code>(</code> after the <code>if</code> keyword doesn&#x27;t actually do anything useful? The language would be just as unambiguous and easy to parse without it, like:</p>
+<pre class="lox"><code>if condition) print(&quot;looks weird&quot;);</code></pre>
+<p>The closing <code>)</code> is useful because it separates the condition expression from the body. Some languages use a <code>then</code> keyword instead. But the opening <code>(</code> doesn&#x27;t do anything. It&#x27;s just there because unmatched parentheses look bad to us humans.</p>
+<p>&lt;/aside&gt;</p>
+<p>First we compile the condition expression, bracketed by parentheses. At runtime, that will leave the condition value on top of the stack. We&#x27;ll use that to determine whether to execute the then branch or skip it.</p>
+<p>Then we emit a new <code>OP_JUMP_IF_FALSE</code> instruction. It has an operand for how much to offset the <code>ip</code> -- how many bytes of code to skip. If the condition is falsey, it adjusts the <code>ip</code> by that amount. Something like this:</p>
+<p>&lt;aside name=&quot;legend&quot;&gt;</p>
+<p>The boxes with the torn edges here represent the blob of bytecode generated by compiling some sub-clause of a control flow construct. So the &quot;condition expression&quot; box is all of the instructions emitted when we compiled that expression.</p>
+<p>&lt;/aside&gt;</p>
+<p>&lt;span name=&quot;legend&quot;&gt;&lt;/span&gt;</p>
+<p>&lt;img src=&quot;image/jumping-back-and-forth/if-without-else.png&quot; alt=&quot;Flowchart of the compiled bytecode of an if statement.&quot; /&gt;</p>
+<p>But we have a problem. When we&#x27;re writing the <code>OP_JUMP_IF_FALSE</code> instruction&#x27;s operand, how do we know how far to jump? We haven&#x27;t compiled the then branch yet, so we don&#x27;t know how much bytecode it contains.</p>
+<p>To fix that, we use a classic trick called <strong>backpatching</strong>. We emit the jump instruction first with a placeholder offset operand. We keep track of where that half-finished instruction is. Next, we compile the then body. Once that&#x27;s done, we know how far to jump. So we go back and replace that placeholder offset with the real one now that we can calculate it. Sort of like sewing a patch onto the existing fabric of the compiled code.</p>
+<p>&lt;img src=&quot;image/jumping-back-and-forth/patch.png&quot; alt=&quot;A patch containing a number being sewn onto a sheet of bytecode.&quot; /&gt;</p>
+<p>We encode this trick into two helper functions.</p>
+<p>^code emit-jump</p>
+<p>The first emits a bytecode instruction and writes a placeholder operand for the jump offset. We pass in the opcode as an argument because later we&#x27;ll have two different instructions that use this helper. We use two bytes for the jump offset operand. A 16-bit &lt;span name=&quot;offset&quot;&gt;offset&lt;/span&gt; lets us jump over up to 65,535 bytes of code, which should be plenty for our needs.</p>
+<p>&lt;aside name=&quot;offset&quot;&gt;</p>
+<p>Some instruction sets have separate &quot;long&quot; jump instructions that take larger operands for when you need to jump a greater distance.</p>
+<p>&lt;/aside&gt;</p>
+<p>The function returns the offset of the emitted instruction in the chunk. After compiling the then branch, we take that offset and pass it to this:</p>
+<p>^code patch-jump</p>
+<p>This goes back into the bytecode and replaces the operand at the given location with the calculated jump offset. We call <code>patchJump()</code> right before we emit the next instruction that we want the jump to land on, so it uses the current bytecode count to determine how far to jump. In the case of an <code>if</code> statement, that means right after we compile the then branch and before we compile the next statement.</p>
+<p>That&#x27;s all we need at compile time. Let&#x27;s define the new instruction.</p>
+<p>^code jump-if-false-op (1 before, 1 after)</p>
+<p>Over in the VM, we get it working like so:</p>
+<p>^code op-jump-if-false (2 before, 1 after)</p>
+<p>This is the first instruction we&#x27;ve added that takes a 16-bit operand. To read that from the chunk, we use a new macro.</p>
+<p>^code read-short (1 before, 1 after)</p>
+<p>It yanks the next two bytes from the chunk and builds a 16-bit unsigned integer out of them. As usual, we clean up our macro when we&#x27;re done with it.</p>
+<p>^code undef-read-short (1 before, 1 after)</p>
+<p>After reading the offset, we check the condition value on top of the stack. &lt;span name=&quot;if&quot;&gt;If&lt;/span&gt; it&#x27;s falsey, we apply this jump offset to the <code>ip</code>. Otherwise, we leave the <code>ip</code> alone and execution will automatically proceed to the next instruction following the jump instruction.</p>
+<p>In the case where the condition is falsey, we don&#x27;t need to do any other work. We&#x27;ve offset the <code>ip</code>, so when the outer instruction dispatch loop turns again, it will pick up execution at that new instruction, past all of the code in the then branch.</p>
+<p>&lt;aside name=&quot;if&quot;&gt;</p>
+<p>I said we wouldn&#x27;t use C&#x27;s <code>if</code> statement to implement Lox&#x27;s control flow, but we do use one here to determine whether or not to offset the instruction pointer. But we aren&#x27;t really using C for <em>control flow</em>. If we wanted to, we could do the same thing purely arithmetically. Let&#x27;s assume we have a function <code>falsey()</code> that takes a Lox Value and returns 1 if it&#x27;s falsey or 0 otherwise. Then we could implement the jump instruction like:</p>
+<pre class="c"><code>case OP_JUMP_IF_FALSE: {
+  uint16_t offset = READ_SHORT();
+  vm.ip += falsey() * offset;
+  break;
+}</code></pre>
+<p>The <code>falsey()</code> function would probably use some control flow to handle the different value types, but that&#x27;s an implementation detail of that function and doesn&#x27;t affect how our VM does its own control flow.</p>
+<p>&lt;/aside&gt;</p>
+<p>Note that the jump instruction doesn&#x27;t pop the condition value off the stack. So we aren&#x27;t totally done here, since this leaves an extra value floating around on the stack. We&#x27;ll clean that up soon. Ignoring that for the moment, we do have a working <code>if</code> statement in Lox now, with only one little instruction required to support it at runtime in the VM.</p>
+<h3>Else clauses</h3>
+<p>An <code>if</code> statement without support for <code>else</code> clauses is like Morticia Addams without Gomez. So, after we compile the then branch, we look for an <code>else</code> keyword. If we find one, we compile the else branch.</p>
+<p>^code compile-else (1 before, 1 after)</p>
+<p>When the condition is falsey, we&#x27;ll jump over the then branch. If there&#x27;s an else branch, the <code>ip</code> will land right at the beginning of its code. But that&#x27;s not enough, though. Here&#x27;s the flow that leads to:</p>
+<p>&lt;img src=&quot;image/jumping-back-and-forth/bad-else.png&quot; alt=&quot;Flowchart of the compiled bytecode with the then branch incorrectly falling through to the else branch.&quot; /&gt;</p>
+<p>If the condition is truthy, we execute the then branch like we want. But after that, execution rolls right on through into the else branch. Oops! When the condition is true, after we run the then branch, we need to jump over the else branch. That way, in either case, we only execute a single branch, like this:</p>
+<p>&lt;img src=&quot;image/jumping-back-and-forth/if-else.png&quot; alt=&quot;Flowchart of the compiled bytecode for an if with an else clause.&quot; /&gt;</p>
+<p>To implement that, we need another jump from the end of the then branch.</p>
+<p>^code jump-over-else (2 before, 1 after)</p>
+<p>We patch that offset after the end of the else body.</p>
+<p>^code patch-else (1 before, 1 after)</p>
+<p>After executing the then branch, this jumps to the next statement after the else branch. Unlike the other jump, this jump is unconditional. We always take it, so we need another instruction that expresses that.</p>
+<p>^code jump-op (1 before, 1 after)</p>
+<p>We interpret it like so:</p>
+<p>^code op-jump (2 before, 1 after)</p>
+<p>Nothing too surprising here -- the only difference is that it doesn&#x27;t check a condition and always applies the offset.</p>
+<p>We have then and else branches working now, so we&#x27;re close. The last bit is to clean up that condition value we left on the stack. Remember, each statement is required to have zero stack effect -- after the statement is finished executing, the stack should be as tall as it was before.</p>
+<p>We could have the <code>OP_JUMP_IF_FALSE</code> instruction pop the condition itself, but soon we&#x27;ll use that same instruction for the logical operators where we don&#x27;t want the condition popped. Instead, we&#x27;ll have the compiler emit a couple of explicit <code>OP_POP</code> instructions when compiling an <code>if</code> statement. We need to take care that every execution path through the generated code pops the condition.</p>
+<p>When the condition is truthy, we pop it right before the code inside the then branch.</p>
+<p>^code pop-then (1 before, 1 after)</p>
+<p>Otherwise, we pop it at the beginning of the else branch.</p>
+<p>^code pop-end (1 before, 2 after)</p>
+<p>This little instruction here also means that every <code>if</code> statement has an implicit else branch even if the user didn&#x27;t write an <code>else</code> clause. In the case where they left it off, all the branch does is discard the condition value.</p>
+<p>The full correct flow looks like this:</p>
+<p>&lt;img src=&quot;image/jumping-back-and-forth/full-if-else.png&quot; alt=&quot;Flowchart of the compiled bytecode including necessary pop instructions.&quot; /&gt;</p>
+<p>If you trace through, you can see that it always executes a single branch and ensures the condition is popped first. All that remains is a little disassembler support.</p>
+<p>^code disassemble-jump (1 before, 1 after)</p>
+<p>These two instructions have a new format with a 16-bit operand, so we add a new utility function to disassemble them.</p>
+<p>^code jump-instruction</p>
+<p>There we go, that&#x27;s one complete control flow construct. If this were an &#x27;80s movie, the montage music would kick in and the rest of the control flow syntax would take care of itself. Alas, the &lt;span name=&quot;80s&quot;&gt;&#x27;80s&lt;/span&gt; are long over, so we&#x27;ll have to grind it out ourselves.</p>
+<p>&lt;aside name=&quot;80s&quot;&gt;</p>
+<p>My enduring love of Depeche Mode notwithstanding.</p>
+<p>&lt;/aside&gt;</p>
+<h2>Logical Operators</h2>
+<p>You probably remember this from jlox, but the logical operators <code>and</code> and <code>or</code> aren&#x27;t just another pair of binary operators like <code>+</code> and <code>-</code>. Because they short-circuit and may not evaluate their right operand depending on the value of the left one, they work more like control flow expressions.</p>
+<p>They&#x27;re basically a little variation on an <code>if</code> statement with an <code>else</code> clause. The easiest way to explain them is to just show you the compiler code and the control flow it produces in the resulting bytecode. Starting with <code>and</code>, we hook it into the expression parsing table here:</p>
+<p>^code table-and (1 before, 1 after)</p>
+<p>That hands off to a new parser function.</p>
+<p>^code and</p>
+<p>At the point this is called, the left-hand side expression has already been compiled. That means at runtime, its value will be on top of the stack. If that value is falsey, then we know the entire <code>and</code> must be false, so we skip the right operand and leave the left-hand side value as the result of the entire expression. Otherwise, we discard the left-hand value and evaluate the right operand which becomes the result of the whole <code>and</code> expression.</p>
+<p>Those four lines of code right there produce exactly that. The flow looks like this:</p>
+<p>&lt;img src=&quot;image/jumping-back-and-forth/and.png&quot; alt=&quot;Flowchart of the compiled bytecode of an &#x27;and&#x27; expression.&quot; /&gt;</p>
+<p>Now you can see why <code>OP_JUMP_IF_FALSE</code> &lt;span name=&quot;instr&quot;&gt;leaves&lt;/span&gt; the value on top of the stack. When the left-hand side of the <code>and</code> is falsey, that value sticks around to become the result of the entire expression.</p>
+<p>&lt;aside name=&quot;instr&quot;&gt;</p>
+<p>We&#x27;ve got plenty of space left in our opcode range, so we could have separate instructions for conditional jumps that implicitly pop and those that don&#x27;t, I suppose. But I&#x27;m trying to keep things minimal for the book. In your bytecode VM, it&#x27;s worth exploring adding more specialized instructions and seeing how they affect performance.</p>
+<p>&lt;/aside&gt;</p>
+<h3>Logical or operator</h3>
+<p>The <code>or</code> operator is a little more complex. First we add it to the parse table.</p>
+<p>^code table-or (1 before, 1 after)</p>
+<p>When that parser consumes an infix <code>or</code> token, it calls this:</p>
+<p>^code or</p>
+<p>In an <code>or</code> expression, if the left-hand side is <em>truthy</em>, then we skip over the right operand. Thus we need to jump when a value is truthy. We could add a separate instruction, but just to show how our compiler is free to map the language&#x27;s semantics to whatever instruction sequence it wants, I implemented it in terms of the jump instructions we already have.</p>
+<p>When the left-hand side is falsey, it does a tiny jump over the next statement. That statement is an unconditional jump over the code for the right operand. This little dance effectively does a jump when the value is truthy. The flow looks like this:</p>
+<p>&lt;img src=&quot;image/jumping-back-and-forth/or.png&quot; alt=&quot;Flowchart of the compiled bytecode of a logical or expression.&quot; /&gt;</p>
+<p>If I&#x27;m honest with you, this isn&#x27;t the best way to do this. There are more instructions to dispatch and more overhead. There&#x27;s no good reason why <code>or</code> should be slower than <code>and</code>. But it is kind of fun to see that it&#x27;s possible to implement both operators without adding any new instructions. Forgive me my indulgences.</p>
+<p>OK, those are the three <em>branching</em> constructs in Lox. By that, I mean, these are the control flow features that only jump <em>forward</em> over code. Other languages often have some kind of multi-way branching statement like <code>switch</code> and maybe a conditional expression like <code>?:</code>, but Lox keeps it simple.</p>
+<h2>While Statements</h2>
+<p>That takes us to the <em>looping</em> statements, which jump <em>backward</em> so that code can be executed more than once. Lox only has two loop constructs, <code>while</code> and <code>for</code>. A <code>while</code> loop is (much) simpler, so we start the party there.</p>
+<p>^code parse-while (1 before, 1 after)</p>
+<p>When we reach a <code>while</code> token, we call:</p>
+<p>^code while-statement</p>
+<p>Most of this mirrors <code>if</code> statements -- we compile the condition expression, surrounded by mandatory parentheses. That&#x27;s followed by a jump instruction that skips over the subsequent body statement if the condition is falsey.</p>
+<p>We patch the jump after compiling the body and take care to &lt;span name=&quot;pop&quot;&gt;pop&lt;/span&gt; the condition value from the stack on either path. The only difference from an <code>if</code> statement is the loop. That looks like this:</p>
+<p>&lt;aside name=&quot;pop&quot;&gt;</p>
+<p>Really starting to second-guess my decision to use the same jump instructions for the logical operators.</p>
+<p>&lt;/aside&gt;</p>
+<p>^code loop (1 before, 2 after)</p>
+<p>After the body, we call this function to emit a &quot;loop&quot; instruction. That instruction needs to know how far back to jump. When jumping forward, we had to emit the instruction in two stages since we didn&#x27;t know how far we were going to jump until after we emitted the jump instruction. We don&#x27;t have that problem now. We&#x27;ve already compiled the point in code that we want to jump back to -- it&#x27;s right before the condition expression.</p>
+<p>All we need to do is capture that location as we compile it.</p>
+<p>^code loop-start (1 before, 1 after)</p>
+<p>After executing the body of a <code>while</code> loop, we jump all the way back to before the condition. That way, we re-evaluate the condition expression on each iteration. We store the chunk&#x27;s current instruction count in <code>loopStart</code> to record the offset in the bytecode right before the condition expression we&#x27;re about to compile. Then we pass that into this helper function:</p>
+<p>^code emit-loop</p>
+<p>It&#x27;s a bit like <code>emitJump()</code> and <code>patchJump()</code> combined. It emits a new loop instruction, which unconditionally jumps <em>backwards</em> by a given offset. Like the jump instructions, after that we have a 16-bit operand. We calculate the offset from the instruction we&#x27;re currently at to the <code>loopStart</code> point that we want to jump back to. The <code>+ 2</code> is to take into account the size of the <code>OP_LOOP</code> instruction&#x27;s own operands which we also need to jump over.</p>
+<p>From the VM&#x27;s perspective, there really is no semantic difference between <code>OP_LOOP</code> and <code>OP_JUMP</code>. Both just add an offset to the <code>ip</code>. We could have used a single instruction for both and given it a signed offset operand. But I figured it was a little easier to sidestep the annoying bit twiddling required to manually pack a signed 16-bit integer into two bytes, and we&#x27;ve got the opcode space available, so why not use it?</p>
+<p>The new instruction is here:</p>
+<p>^code loop-op (1 before, 1 after)</p>
+<p>And in the VM, we implement it thusly:</p>
+<p>^code op-loop (1 before, 1 after)</p>
+<p>The only difference from <code>OP_JUMP</code> is a subtraction instead of an addition. Disassembly is similar too.</p>
+<p>^code disassemble-loop (1 before, 1 after)</p>
+<p>That&#x27;s our <code>while</code> statement. It contains two jumps -- a conditional forward one to escape the loop when the condition is not met, and an unconditional loop backward after we have executed the body. The flow looks like this:</p>
+<p>&lt;img src=&quot;image/jumping-back-and-forth/while.png&quot; alt=&quot;Flowchart of the compiled bytecode of a while statement.&quot; /&gt;</p>
+<h2>For Statements</h2>
+<p>The other looping statement in Lox is the venerable <code>for</code> loop, inherited from C. It&#x27;s got a lot more going on with it compared to a <code>while</code> loop. It has three clauses, all of which are optional:</p>
+<p>&lt;span name=&quot;detail&quot;&gt;&lt;/span&gt;</p>
+<ul>
+<li>  The initializer can be a variable declaration or an expression. It runs once</li>
+</ul>
+<p>    at the beginning of the statement.</p>
+<ul>
+<li>  The condition clause is an expression. Like in a <code>while</code> loop, we exit the</li>
+</ul>
+<p>    loop when it evaluates to something falsey.</p>
+<ul>
+<li>  The increment expression runs once at the end of each loop iteration.</li>
+</ul>
+<p>&lt;aside name=&quot;detail&quot;&gt;</p>
+<p>If you want a refresher, the corresponding chapter in part II goes through the semantics [in more detail][jlox</p>
+<p>].</p>
+<p>[jlox]: control-flow.html#for-loops</p>
+<p>&lt;/aside&gt;</p>
+<p>In jlox, the parser desugared a <code>for</code> loop to a synthesized AST for a <code>while</code> loop with some extra stuff before it and at the end of the body. We&#x27;ll do something similar, though we won&#x27;t go through anything like an AST. Instead, our bytecode compiler will use the jump and loop instructions we already have.</p>
+<p>We&#x27;ll work our way through the implementation a piece at a time, starting with the <code>for</code> keyword.</p>
+<p>^code parse-for (1 before, 1 after)</p>
+<p>It calls a helper function. If we only supported <code>for</code> loops with empty clauses like <code>for (;;)</code>, then we could implement it like this:</p>
+<p>^code for-statement</p>
+<p>There&#x27;s a bunch of mandatory punctuation at the top. Then we compile the body. Like we did for <code>while</code> loops, we record the bytecode offset at the top of the body and emit a loop to jump back to that point after it. We&#x27;ve got a working implementation of &lt;span name=&quot;infinite&quot;&gt;infinite&lt;/span&gt; loops now.</p>
+<p>&lt;aside name=&quot;infinite&quot;&gt;</p>
+<p>Alas, without <code>return</code> statements, there isn&#x27;t any way to terminate it short of a runtime error.</p>
+<p>&lt;/aside&gt;</p>
+<h3>Initializer clause</h3>
+<p>Now we&#x27;ll add the first clause, the initializer. It executes only once, before the body, so compiling is straightforward.</p>
+<p>^code for-initializer (1 before, 2 after)</p>
+<p>The syntax is a little complex since we allow either a variable declaration or an expression. We use the presence of the <code>var</code> keyword to tell which we have. For the expression case, we call <code>expressionStatement()</code> instead of <code>expression()</code>. That looks for a semicolon, which we need here too, and also emits an <code>OP_POP</code> instruction to discard the value. We don&#x27;t want the initializer to leave anything on the stack.</p>
+<p>If a <code>for</code> statement declares a variable, that variable should be scoped to the loop body. We ensure that by wrapping the whole statement in a scope.</p>
+<p>^code for-begin-scope (1 before, 1 after)</p>
+<p>Then we close it at the end.</p>
+<p>^code for-end-scope (1 before, 1 after)</p>
+<h3>Condition clause</h3>
+<p>Next, is the condition expression that can be used to exit the loop.</p>
+<p>^code for-exit (1 before, 1 after)</p>
+<p>Since the clause is optional, we need to see if it&#x27;s actually present. If the clause is omitted, the next token must be a semicolon, so we look for that to tell. If there isn&#x27;t a semicolon, there must be a condition expression.</p>
+<p>In that case, we compile it. Then, just like with while, we emit a conditional jump that exits the loop if the condition is falsey. Since the jump leaves the value on the stack, we pop it before executing the body. That ensures we discard the value when the condition is true.</p>
+<p>After the loop body, we need to patch that jump.</p>
+<p>^code exit-jump (1 before, 2 after)</p>
+<p>We do this only when there is a condition clause. If there isn&#x27;t, there&#x27;s no jump to patch and no condition value on the stack to pop.</p>
+<h3>Increment clause</h3>
+<p>I&#x27;ve saved the best for last, the increment clause. It&#x27;s pretty convoluted. It appears textually before the body, but executes <em>after</em> it. If we parsed to an AST and generated code in a separate pass, we could simply traverse into and compile the <code>for</code> statement AST&#x27;s body field before its increment clause.</p>
+<p>Unfortunately, we can&#x27;t compile the increment clause later, since our compiler only makes a single pass over the code. Instead, we&#x27;ll <em>jump over</em> the increment, run the body, jump <em>back</em> up to the increment, run it, and then go to the next iteration.</p>
+<p>I know, a little weird, but hey, it beats manually managing ASTs in memory in C, right? Here&#x27;s the code:</p>
+<p>^code for-increment (2 before, 2 after)</p>
+<p>Again, it&#x27;s optional. Since this is the last clause, when omitted, the next token will be the closing parenthesis. When an increment is present, we need to compile it now, but it shouldn&#x27;t execute yet. So, first, we emit an unconditional jump that hops over the increment clause&#x27;s code to the body of the loop.</p>
+<p>Next, we compile the increment expression itself. This is usually an assignment. Whatever it is, we only execute it for its side effect, so we also emit a pop to discard its value.</p>
+<p>The last part is a little tricky. First, we emit a loop instruction. This is the main loop that takes us back to the top of the <code>for</code> loop -- right before the condition expression if there is one. That loop happens right after the increment, since the increment executes at the end of each loop iteration.</p>
+<p>Then we change <code>loopStart</code> to point to the offset where the increment expression begins. Later, when we emit the loop instruction after the body statement, this will cause it to jump up to the <em>increment</em> expression instead of the top of the loop like it does when there is no increment. This is how we weave the increment in to run after the body.</p>
+<p>It&#x27;s convoluted, but it all works out. A complete loop with all the clauses compiles to a flow like this:</p>
+<p>&lt;img src=&quot;image/jumping-back-and-forth/for.png&quot; alt=&quot;Flowchart of the compiled bytecode of a for statement.&quot; /&gt;</p>
+<p>As with implementing <code>for</code> loops in jlox, we didn&#x27;t need to touch the runtime. It all gets compiled down to primitive control flow operations the VM already supports. In this chapter, we&#x27;ve taken a big &lt;span name=&quot;leap&quot;&gt;leap&lt;/span&gt; forward -- clox is now Turing complete. We&#x27;ve also covered quite a bit of new syntax: three statements and two expression forms. Even so, it only took three new simple instructions. That&#x27;s a pretty good effort-to-reward ratio for the architecture of our VM.</p>
+<p>&lt;aside name=&quot;leap&quot;&gt;</p>
+<p>I couldn&#x27;t resist the pun. I regret nothing.</p>
+<p>&lt;/aside&gt;</p>
+<p>&lt;div class=&quot;challenges&quot;&gt;</p>
+<h2>Challenges</h2>
+<p>1.  In addition to <code>if</code> statements, most C-family languages have a multi-way     <code>switch</code> statement. Add one to clox. The grammar is:</p>
+<p>    <code></code>`ebnf     switchStmt     → &quot;switch&quot; &quot;(&quot; expression &quot;)&quot;                      &quot;{&quot; switchCase<em> defaultCase? &quot;}&quot; ;     switchCase     → &quot;case&quot; expression &quot;:&quot; statement</em> ;     defaultCase    → &quot;default&quot; &quot;:&quot; statement* ;     <code></code>`</p>
+<p>    To execute a <code>switch</code> statement, first evaluate the parenthesized switch     value expression. Then walk the cases. For each case, evaluate its value     expression. If the case value is equal to the switch value, execute the     statements under the case and then exit the <code>switch</code> statement. Otherwise,     try the next case. If no case matches and there is a <code>default</code> clause,     execute its statements.</p>
+<p>    To keep things simpler, we&#x27;re omitting fallthrough and <code>break</code> statements.     Each case automatically jumps to the end of the switch statement after its     statements are done.</p>
+<p>1.  In jlox, we had a challenge to add support for <code>break</code> statements. This     time, let&#x27;s do <code>continue</code>:</p>
+<p>    <code></code>`ebnf     continueStmt   → &quot;continue&quot; &quot;;&quot; ;     <code></code>`</p>
+<p>    A <code>continue</code> statement jumps directly to the top of the nearest enclosing     loop, skipping the rest of the loop body. Inside a <code>for</code> loop, a <code>continue</code>     jumps to the increment clause, if there is one. It&#x27;s a compile-time error to     have a <code>continue</code> statement not enclosed in a loop.</p>
+<p>    Make sure to think about scope. What should happen to local variables     declared inside the body of the loop or in blocks nested inside the loop     when a <code>continue</code> is executed?</p>
+<p>1.  Control flow constructs have been mostly unchanged since Algol 68. Language     evolution since then has focused on making code more declarative and high     level, so imperative control flow hasn&#x27;t gotten much attention.</p>
+<p>    For fun, try to invent a useful novel control flow feature for Lox. It can     be a refinement of an existing form or something entirely new. In practice,     it&#x27;s hard to come up with something useful enough at this low expressiveness     level to outweigh the cost of forcing a user to learn an unfamiliar notation     and behavior, but it&#x27;s a good chance to practice your design skills.</p>
+<p>&lt;/div&gt;</p>
+<p>&lt;div class=&quot;design-note&quot;&gt;</p>
+<h2>Design Note: Considering Goto Harmful</h2>
+<p>Discovering that all of our beautiful structured control flow in Lox is actually compiled to raw unstructured jumps is like the moment in Scooby Doo when the monster rips the mask off their face. It was goto all along! Except in this case, the monster is <em>under</em> the mask. We all know goto is evil. But... why?</p>
+<p>It is true that you can write outrageously unmaintainable code using goto. But I don&#x27;t think most programmers around today have seen that first hand. It&#x27;s been a long time since that style was common. These days, it&#x27;s a boogie man we invoke in scary stories around the campfire.</p>
+<p>The reason we rarely confront that monster in person is because Edsger Dijkstra slayed it with his famous letter &quot;Go To Statement Considered Harmful&quot;, published in <em>Communications of the ACM</em> (March, 1968). Debate around structured programming had been fierce for some time with adherents on both sides, but I think Dijkstra deserves the most credit for effectively ending it. Most new languages today have no unstructured jump statements.</p>
+<p>A one-and-a-half page letter that almost single-handedly destroyed a language feature must be pretty impressive stuff. If you haven&#x27;t read it, I encourage you to do so. It&#x27;s a seminal piece of computer science lore, one of our tribe&#x27;s ancestral songs. Also, it&#x27;s a nice, short bit of practice for reading academic CS &lt;span name=&quot;style&quot;&gt;writing&lt;/span&gt;, which is a useful skill to develop.</p>
+<p>&lt;aside name=&quot;style&quot;&gt;</p>
+<p>That is, if you can get past Dijkstra&#x27;s insufferable faux-modest self-aggrandizing writing style:</p>
+<blockquote> More recently I discovered why the use of the go to statement has such</blockquote><blockquote> disastrous effects. ...At that time I did not attach too much importance to</blockquote><blockquote> this discovery; I now submit my considerations for publication because in very</blockquote><blockquote> recent discussions in which the subject turned up, I have been urged to do so.</blockquote><p>Ah, yet another one of my many discoveries. I couldn&#x27;t even be bothered to write it up until the clamoring masses begged me to.</p>
+<p>&lt;/aside&gt;</p>
+<p>I&#x27;ve read it through a number of times, along with a few critiques, responses, and commentaries. I ended up with mixed feelings, at best. At a very high level, I&#x27;m with him. His general argument is something like this:</p>
+<p>1.  As programmers, we write programs -- static text -- but what we care about     is the actual running program -- its dynamic behavior.</p>
+<p>2.  We&#x27;re better at reasoning about static things than dynamic things. (He     doesn&#x27;t provide any evidence to support this claim, but I accept it.)</p>
+<p>3.  Thus, the more we can make the dynamic execution of the program reflect its     textual structure, the better.</p>
+<p>This is a good start. Drawing our attention to the separation between the code we write and the code as it runs inside the machine is an interesting insight. Then he tries to define a &quot;correspondence&quot; between program text and execution. For someone who spent literally his entire career advocating greater rigor in programming, his definition is pretty hand-wavey. He says:</p>
+<blockquote> Let us now consider how we can characterize the progress of a process. (You</blockquote><blockquote> may think about this question in a very concrete manner: suppose that a</blockquote><blockquote> process, considered as a time succession of actions, is stopped after an</blockquote><blockquote> arbitrary action, what data do we have to fix in order that we can redo the</blockquote><blockquote> process until the very same point?)</blockquote><p>Imagine it like this. You have two computers with the same program running on the exact same inputs -- so totally deterministic. You pause one of them at an arbitrary point in its execution. What data would you need to send to the other computer to be able to stop it exactly as far along as the first one was?</p>
+<p>If your program allows only simple statements like assignment, it&#x27;s easy. You just need to know the point after the last statement you executed. Basically a breakpoint, the <code>ip</code> in our VM, or the line number in an error message. Adding branching control flow like <code>if</code> and <code>switch</code> doesn&#x27;t add any more to this. Even if the marker points inside a branch, we can still tell where we are.</p>
+<p>Once you add function calls, you need something more. You could have paused the first computer in the middle of a function, but that function may be called from multiple places. To pause the second machine at exactly the same point in <em>the entire program&#x27;s</em> execution, you need to pause it on the <em>right</em> call to that function.</p>
+<p>So you need to know not just the current statement, but, for function calls that haven&#x27;t returned yet, you need to know the locations of the callsites. In other words, a call stack, though I don&#x27;t think that term existed when Dijkstra wrote this. Groovy.</p>
+<p>He notes that loops make things harder. If you pause in the middle of a loop body, you don&#x27;t know how many iterations have run. So he says you also need to keep an iteration count. And, since loops can nest, you need a stack of those (presumably interleaved with the call stack pointers since you can be in loops in outer calls too).</p>
+<p>This is where it gets weird. So we&#x27;re really building to something now, and you expect him to explain how goto breaks all of this. Instead, he just says:</p>
+<blockquote> The unbridled use of the go to statement has an immediate consequence that it</blockquote><blockquote> becomes terribly hard to find a meaningful set of coordinates in which to</blockquote><blockquote> describe the process progress.</blockquote><p>He doesn&#x27;t prove that this is hard, or say why. He just says it. He does say that one approach is unsatisfactory:</p>
+<blockquote> With the go to statement one can, of course, still describe the progress</blockquote><blockquote> uniquely by a counter counting the number of actions performed since program</blockquote><blockquote> start (viz. a kind of normalized clock). The difficulty is that such a</blockquote><blockquote> coordinate, although unique, is utterly unhelpful.</blockquote><p>But... that&#x27;s effectively what loop counters do, and he was fine with those. It&#x27;s not like every loop is a simple &quot;for every integer from 0 to 10&quot; incrementing count. Many are <code>while</code> loops with complex conditionals.</p>
+<p>Taking an example close to home, consider the core bytecode execution loop at the heart of clox. Dijkstra argues that that loop is tractable because we can simply count how many times the loop has run to reason about its progress. But that loop runs once for each executed instruction in some user&#x27;s compiled Lox program. Does knowing that it executed 6,201 bytecode instructions really tell us VM maintainers <em>anything</em> edifying about the state of the interpreter?</p>
+<p>In fact, this particular example points to a deeper truth. Böhm and Jacopini [proved][</p>
+<p>] that <em>any</em> control flow using goto can be transformed into one using just sequencing, loops, and branches. Our bytecode interpreter loop is a living example of that proof: it implements the unstructured control flow of the clox bytecode instruction set without using any gotos itself.</p>
+<p>[proved]: https://en.wikipedia.org/wiki/Structured_program_theorem</p>
+<p>That seems to offer a counter-argument to Dijkstra&#x27;s claim: you <em>can</em> define a correspondence for a program using gotos by transforming it to one that doesn&#x27;t and then use the correspondence from that program, which -- according to him -- is acceptable because it uses only branches and loops.</p>
+<p>But, honestly, my argument here is also weak. I think both of us are basically doing pretend math and using fake logic to make what should be an empirical, human-centered argument. Dijkstra is right that some code using goto is really bad. Much of that could and should be turned into clearer code by using structured control flow.</p>
+<p>By eliminating goto completely from languages, you&#x27;re definitely prevented from writing bad code using gotos. It may be that forcing users to use structured control flow and making it an uphill battle to write goto-like code using those constructs is a net win for all of our productivity.</p>
+<p>But I do wonder sometimes if we threw out the baby with the bathwater. In the absence of goto, we often resort to more complex structured patterns. The &quot;switch inside a loop&quot; is a classic one. Another is using a guard variable to exit out of a series of nested loops:</p>
+<p>&lt;span name=&quot;break&quot;&gt; &lt;/span&gt;</p>
+<pre class="c"><code>// See if the matrix contains a zero.
+bool found = false;
+for (int x = 0; x &lt; xSize; x++) {
+  for (int y = 0; y &lt; ySize; y++) {
+    for (int z = 0; z &lt; zSize; z++) {
+      if (matrix[x][y][z] == 0) {
+        printf(&quot;found&quot;);
+        found = true;
+        break;
+      }
+    }
+    if (found) break;
+  }
+  if (found) break;
+}</code></pre>
+<p>Is that really better than:</p>
+<pre class="c"><code>for (int x = 0; x &lt; xSize; x++) {
+  for (int y = 0; y &lt; ySize; y++) {
+    for (int z = 0; z &lt; zSize; z++) {
+      if (matrix[x][y][z] == 0) {
+        printf(&quot;found&quot;);
+        goto done;
+      }
+    }
+  }
+}
+done:</code></pre>
+<p>&lt;aside name=&quot;break&quot;&gt;</p>
+<p>You could do this without <code>break</code> statements -- themselves a limited goto-ish construct -- by inserting <code>!found &amp;&amp;</code> at the beginning of the condition clause of each loop.</p>
+<p>&lt;/aside&gt;</p>
+<p>I guess what I really don&#x27;t like is that we&#x27;re making language design and engineering decisions today based on fear. Few people today have any subtle understanding of the problems and benefits of goto. Instead, we just think it&#x27;s &quot;considered harmful&quot;. Personally, I&#x27;ve never found dogma a good starting place for quality creative work.</p>
+<p>&lt;/div&gt; </p>

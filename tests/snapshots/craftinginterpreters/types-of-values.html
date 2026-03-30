@@ -1,0 +1,216 @@
+<blockquote> When you are a Bear of Very Little Brain, and you Think of Things, you find</blockquote><blockquote> sometimes that a Thing which seemed very Thingish inside you is quite</blockquote><blockquote> different when it gets out into the open and has other people looking at it.</blockquote><blockquote></blockquote><blockquote> &lt;cite&gt;A. A. Milne, &lt;em&gt;Winnie-the-Pooh&lt;/em&gt;&lt;/cite&gt;</blockquote><p>The past few chapters were huge, packed full of complex techniques and pages of code. In this chapter, there&#x27;s only one new concept to learn and a scattering of straightforward code. You&#x27;ve earned a respite.</p>
+<p>Lox is &lt;span name=&quot;unityped&quot;&gt;dynamically&lt;/span&gt; typed. A single variable can hold a Boolean, number, or string at different points in time. At least, that&#x27;s the idea. Right now, in clox, all values are numbers. By the end of the chapter, it will also support Booleans and <code>nil</code>. While those aren&#x27;t super interesting, they force us to figure out how our value representation can dynamically handle different types.</p>
+<p>&lt;aside name=&quot;unityped&quot;&gt;</p>
+<p>There is a third category next to statically typed and dynamically typed: <strong>unityped</strong>. In that paradigm, all variables have a single type, usually a machine register integer. Unityped languages aren&#x27;t common today, but some Forths and BCPL, the language that inspired C, worked like this.</p>
+<p>As of this moment, clox is unityped.</p>
+<p>&lt;/aside&gt;</p>
+<h2>Tagged Unions</h2>
+<p>The nice thing about working in C is that we can build our data structures from the raw bits up. The bad thing is that we <em>have</em> to do that. C doesn&#x27;t give you much for free at compile time and even less at runtime. As far as C is concerned, the universe is an undifferentiated array of bytes. It&#x27;s up to us to decide how many of those bytes to use and what they mean.</p>
+<p>In order to choose a value representation, we need to answer two key questions:</p>
+<p>1.  <strong>How do we represent the type of a value?</strong> If you try to, say, multiply a     number by <code>true</code>, we need to detect that error at runtime and report it. In     order to do that, we need to be able to tell what a value&#x27;s type is.</p>
+<p>2.  <strong>How do we store the value itself?</strong> We need to not only be able to tell     that three is a number, but that it&#x27;s different from the number four. I     know, seems obvious, right? But we&#x27;re operating at a level where it&#x27;s good     to spell these things out.</p>
+<p>Since we&#x27;re not just designing this language but building it ourselves, when answering these two questions we also have to keep in mind the implementer&#x27;s eternal quest: to do it <em>efficiently</em>.</p>
+<p>Language hackers over the years have come up with a variety of clever ways to pack the above information into as few bits as possible. For now, we&#x27;ll start with the simplest, classic solution: a <strong>tagged union</strong>. A value contains two parts: a type &quot;tag&quot;, and a payload for the actual value. To store the value&#x27;s type, we define an enum for each kind of value the VM supports.</p>
+<p>^code value-type (2 before, 1 after)</p>
+<p>&lt;aside name=&quot;user-types&quot;&gt;</p>
+<p>The cases here cover each kind of value that has <em>built-in support in the VM</em>. When we get to adding classes to the language, each class the user defines doesn&#x27;t need its own entry in this enum. As far as the VM is concerned, every instance of a class is the same type: &quot;instance&quot;.</p>
+<p>In other words, this is the VM&#x27;s notion of &quot;type&quot;, not the user&#x27;s.</p>
+<p>&lt;/aside&gt;</p>
+<p>For now, we have only a couple of cases, but this will grow as we add strings, functions, and classes to clox. In addition to the type, we also need to store the data for the value -- the <code>double</code> for a number, <code>true</code> or <code>false</code> for a Boolean. We could define a struct with fields for each possible type.</p>
+<p>&lt;img src=&quot;image/types-of-values/struct.png&quot; alt=&quot;A struct with two fields laid next to each other in memory.&quot; /&gt;</p>
+<p>But this is a waste of memory. A value can&#x27;t simultaneously be both a number and a Boolean. So at any point in time, only one of those fields will be used. C lets you optimize this by defining a &lt;span name=&quot;sum&quot;&gt;union&lt;/span&gt;. A union looks like a struct except that all of its fields overlap in memory.</p>
+<p>&lt;aside name=&quot;sum&quot;&gt;</p>
+<p>If you&#x27;re familiar with a language in the ML family, structs and unions in C roughly mirror the difference between product and sum types, between tuples and algebraic data types.</p>
+<p>&lt;/aside&gt;</p>
+<p>&lt;img src=&quot;image/types-of-values/union.png&quot; alt=&quot;A union with two fields overlapping in memory.&quot; /&gt;</p>
+<p>The size of a union is the size of its largest field. Since the fields all reuse the same bits, you have to be very careful when working with them. If you store data using one field and then access it using &lt;span name=&quot;reinterpret&quot;&gt;another&lt;/span&gt;, you will reinterpret what the underlying bits mean.</p>
+<p>&lt;aside name=&quot;reinterpret&quot;&gt;</p>
+<p>Using a union to interpret bits as different types is the quintessence of C. It opens up a number of clever optimizations and lets you slice and dice each byte of memory in ways that memory-safe languages disallow. But it is also wildly unsafe and will happily saw your fingers off if you don&#x27;t watch out.</p>
+<p>&lt;/aside&gt;</p>
+<p>As the name &quot;tagged union&quot; implies, our new value representation combines these two parts into a single struct.</p>
+<p>^code value (2 before, 2 after)</p>
+<p>There&#x27;s a field for the type tag, and then a second field containing the union of all of the underlying values. On a 64-bit machine with a typical C compiler, the layout looks like this:</p>
+<p>&lt;aside name=&quot;as&quot;&gt;</p>
+<p>A smart language hacker gave me the idea to use &quot;as&quot; for the name of the union field because it reads nicely, almost like a cast, when you pull the various values out.</p>
+<p>&lt;/aside&gt;</p>
+<p>&lt;img src=&quot;image/types-of-values/value.png&quot; alt=&quot;The full value struct, with the type and as fields next to each other in memory.&quot; /&gt;</p>
+<p>The four-byte type tag comes first, then the union. Most architectures prefer values be aligned to their size. Since the union field contains an eight-byte double, the compiler adds four bytes of &lt;span name=&quot;pad&quot;&gt;padding&lt;/span&gt; after the type field to keep that double on the nearest eight-byte boundary. That means we&#x27;re effectively spending eight bytes on the type tag, which only needs to represent a number between zero and three. We could stuff the enum in a smaller size, but all that would do is increase the padding.</p>
+<p>&lt;aside name=&quot;pad&quot;&gt;</p>
+<p>We could move the tag field <em>after</em> the union, but that doesn&#x27;t help much either. Whenever we create an array of Values -- which is where most of our memory usage for Values will be -- the C compiler will insert that same padding <em>between</em> each Value to keep the doubles aligned.</p>
+<p>&lt;/aside&gt;</p>
+<p>So our Values are 16 bytes, which seems a little large. We&#x27;ll improve it [later][optimization</p>
+<p>]. In the meantime, they&#x27;re still small enough to store on the C stack and pass around by value. Lox&#x27;s semantics allow that because the only types we support so far are <strong>immutable</strong>. If we pass a copy of a Value containing the number three to some function, we don&#x27;t need to worry about the caller seeing modifications to the value. You can&#x27;t &quot;modify&quot; three. It&#x27;s three forever.</p>
+<p>[optimization]: optimization.html</p>
+<h2>Lox Values and C Values</h2>
+<p>That&#x27;s our new value representation, but we aren&#x27;t done. Right now, the rest of clox assumes Value is an alias for <code>double</code>. We have code that does a straight C cast from one to the other. That code is all broken now. So sad.</p>
+<p>With our new representation, a Value can <em>contain</em> a double, but it&#x27;s not <em>equivalent</em> to it. There is a mandatory conversion step to get from one to the other. We need to go through the code and insert those conversions to get clox working again.</p>
+<p>We&#x27;ll implement these conversions as a handful of macros, one for each type and operation. First, to promote a native C value to a clox Value:</p>
+<p>^code value-macros (1 before, 2 after)</p>
+<p>Each one of these takes a C value of the appropriate type and produces a Value that has the correct type tag and contains the underlying value. This hoists statically typed values up into clox&#x27;s dynamically typed universe. In order to <em>do</em> anything with a Value, though, we need to unpack it and get the C value back out.</p>
+<p>^code as-macros (1 before, 2 after)</p>
+<p>&lt;aside name=&quot;as-null&quot;&gt;</p>
+<p>There&#x27;s no <code>AS_NIL</code> macro because there is only one <code>nil</code> value, so a Value with type <code>VAL_NIL</code> doesn&#x27;t carry any extra data.</p>
+<p>&lt;/aside&gt;</p>
+<p>&lt;span name=&quot;as-null&quot;&gt;These&lt;/span&gt; macros go in the opposite direction. Given a Value of the right type, they unwrap it and return the corresponding raw C value. The &quot;right type&quot; part is important! These macros directly access the union fields. If we were to do something like:</p>
+<pre class="c"><code>Value value = BOOL_VAL(true);
+double number = AS_NUMBER(value);</code></pre>
+<p>Then we may open a smoldering portal to the Shadow Realm. It&#x27;s not safe to use any of the <code>AS_</code> macros unless we know the Value contains the appropriate type. To that end, we define a last few macros to check a Value&#x27;s type.</p>
+<p>^code is-macros (1 before, 2 after)</p>
+<p>&lt;span name=&quot;universe&quot;&gt;These&lt;/span&gt; macros return <code>true</code> if the Value has that type. Any time we call one of the <code>AS_</code> macros, we need to guard it behind a call to one of these first. With these eight macros, we can now safely shuttle data between Lox&#x27;s dynamic world and C&#x27;s static one.</p>
+<p>&lt;aside name=&quot;universe&quot;&gt;</p>
+<p>&lt;img src=&quot;image/types-of-values/universe.png&quot; alt=&quot;The earthly C firmament with the Lox heavens above.&quot; /&gt;</p>
+<p>The <code>_VAL</code> macros lift a C value into the heavens. The <code>AS_</code> macros bring it back down.</p>
+<p>&lt;/aside&gt;</p>
+<h2>Dynamically Typed Numbers</h2>
+<p>We&#x27;ve got our value representation and the tools to convert to and from it. All that&#x27;s left to get clox running again is to grind through the code and fix every place where data moves across that boundary. This is one of those sections of the book that isn&#x27;t exactly mind-blowing, but I promised I&#x27;d show you every single line of code, so here we are.</p>
+<p>The first values we create are the constants generated when we compile number literals. After we convert the lexeme to a C double, we simply wrap it in a Value before storing it in the constant table.</p>
+<p>^code const-number-val (1 before, 1 after)</p>
+<p>Over in the runtime, we have a function to print values.</p>
+<p>^code print-number-value (1 before, 1 after)</p>
+<p>Right before we send the Value to <code>printf()</code>, we unwrap it and extract the double value. We&#x27;ll revisit this function shortly to add the other types, but let&#x27;s get our existing code working first.</p>
+<h3>Unary negation and runtime errors</h3>
+<p>The next simplest operation is unary negation. It pops a value off the stack, negates it, and pushes the result. Now that we have other types of values, we can&#x27;t assume the operand is a number anymore. The user could just as well do:</p>
+<pre class="lox"><code>print -false; // Uh...</code></pre>
+<p>We need to handle that gracefully, which means it&#x27;s time for <em>runtime errors</em>. Before performing an operation that requires a certain type, we need to make sure the Value <em>is</em> that type.</p>
+<p>For unary negation, the check looks like this:</p>
+<p>^code op-negate (1 before, 1 after)</p>
+<p>First, we check to see if the Value on top of the stack is a number. If it&#x27;s not, we report the runtime error and &lt;span name=&quot;halt&quot;&gt;stop&lt;/span&gt; the interpreter. Otherwise, we keep going. Only after this validation do we unwrap the operand, negate it, wrap the result and push it.</p>
+<p>&lt;aside name=&quot;halt&quot;&gt;</p>
+<p>Lox&#x27;s approach to error-handling is rather... <em>spare</em>. All errors are fatal and immediately halt the interpreter. There&#x27;s no way for user code to recover from an error. If Lox were a real language, this is one of the first things I would remedy.</p>
+<p>&lt;/aside&gt;</p>
+<p>To access the Value, we use a new little function.</p>
+<p>^code peek</p>
+<p>It returns a Value from the stack but doesn&#x27;t &lt;span name=&quot;peek&quot;&gt;pop&lt;/span&gt; it. The <code>distance</code> argument is how far down from the top of the stack to look: zero is the top, one is one slot down, etc.</p>
+<p>&lt;aside name=&quot;peek&quot;&gt;</p>
+<p>Why not just pop the operand and then validate it? We could do that. In later chapters, it will be important to leave operands on the stack to ensure the garbage collector can find them if a collection is triggered in the middle of the operation. I do the same thing here mostly out of habit.</p>
+<p>&lt;/aside&gt;</p>
+<p>We report the runtime error using a new function that we&#x27;ll get a lot of mileage out of over the remainder of the book.</p>
+<p>^code runtime-error</p>
+<p>You&#x27;ve certainly <em>called</em> variadic functions -- ones that take a varying number of arguments -- in C before: <code>printf()</code> is one. But you may not have <em>defined</em> your own. This book isn&#x27;t a C &lt;span name=&quot;tutorial&quot;&gt;tutorial&lt;/span&gt;, so I&#x27;ll skim over it here, but basically the <code>...</code> and <code>va_list</code> stuff let us pass an arbitrary number of arguments to <code>runtimeError()</code>. It forwards those on to <code>vfprintf()</code>, which is the flavor of <code>printf()</code> that takes an explicit <code>va_list</code>.</p>
+<p>&lt;aside name=&quot;tutorial&quot;&gt;</p>
+<p>If you are looking for a C tutorial, I love *[The C Programming Language][kr</p>
+<p>]*, usually called &quot;K&amp;R&quot; in honor of its authors. It&#x27;s not entirely up to date, but the quality of the writing more than makes up for it.</p>
+<p>[kr]: https://www.cs.princeton.edu/~bwk/cbook.html</p>
+<p>&lt;/aside&gt;</p>
+<p>Callers can pass a format string to <code>runtimeError()</code> followed by a number of arguments, just like they can when calling <code>printf()</code> directly. <code>runtimeError()</code> then formats and prints those arguments. We won&#x27;t take advantage of that in this chapter, but later chapters will produce formatted runtime error messages that contain other data.</p>
+<p>After we show the hopefully helpful error message, we tell the user which &lt;span name=&quot;stack&quot;&gt;line&lt;/span&gt; of their code was being executed when the error occurred. Since we left the tokens behind in the compiler, we look up the line in the debug information compiled into the chunk. If our compiler did its job right, that corresponds to the line of source code that the bytecode was compiled from.</p>
+<p>We look into the chunk&#x27;s debug line array using the current bytecode instruction index <em>minus one</em>. That&#x27;s because the interpreter advances past each instruction before executing it. So, at the point that we call <code>runtimeError()</code>, the failed instruction is the previous one.</p>
+<p>&lt;aside name=&quot;stack&quot;&gt;</p>
+<p>Just showing the immediate line where the error occurred doesn&#x27;t provide much context. Better would be a full stack trace. But we don&#x27;t even have functions to call yet, so there is no call stack to trace.</p>
+<p>&lt;/aside&gt;</p>
+<p>In order to use <code>va_list</code> and the macros for working with it, we need to bring in a standard header.</p>
+<p>^code include-stdarg (1 after)</p>
+<p>With this, our VM can not only do the right thing when we negate numbers (like it used to before we broke it), but it also gracefully handles erroneous attempts to negate other types (which we don&#x27;t have yet, but still).</p>
+<h3>Binary arithmetic operators</h3>
+<p>We have our runtime error machinery in place now, so fixing the binary operators is easier even though they&#x27;re more complex. We support four binary operators today: <code>+</code>, <code>-</code>, <code>*</code>, and <code>/</code>. The only difference between them is which underlying C operator they use. To minimize redundant code between the four operators, we wrapped up the commonality in a big preprocessor macro that takes the operator token as a parameter.</p>
+<p>That macro seemed like overkill a [few chapters ago][</p>
+<p>], but we get the benefit from it today. It lets us add the necessary type checking and conversions in one place.</p>
+<p>[few chapters ago]: a-virtual-machine.html#binary-operators</p>
+<p>^code binary-op (1 before, 2 after)</p>
+<p>Yeah, I realize that&#x27;s a monster of a macro. It&#x27;s not what I&#x27;d normally consider good C practice, but let&#x27;s roll with it. The changes are similar to what we did for unary negate. First, we check that the two operands are both numbers. If either isn&#x27;t, we report a runtime error and yank the ejection seat lever.</p>
+<p>If the operands are fine, we pop them both and unwrap them. Then we apply the given operator, wrap the result, and push it back on the stack. Note that we don&#x27;t wrap the result by directly using <code>NUMBER_VAL()</code>. Instead, the wrapper to use is passed in as a macro &lt;span name=&quot;macro&quot;&gt;parameter&lt;/span&gt;. For our existing arithmetic operators, the result is a number, so we pass in the <code>NUMBER_VAL</code> macro.</p>
+<p>&lt;aside name=&quot;macro&quot;&gt;</p>
+<p>Did you know you can pass macros as parameters to macros? Now you do!</p>
+<p>&lt;/aside&gt;</p>
+<p>^code op-arithmetic (1 before, 1 after)</p>
+<p>Soon, I&#x27;ll show you why we made the wrapping macro an argument.</p>
+<h2>Two New Types</h2>
+<p>All of our existing clox code is back in working order. Finally, it&#x27;s time to add some new types. We&#x27;ve got a running numeric calculator that now does a number of pointless paranoid runtime type checks. We can represent other types internally, but there&#x27;s no way for a user&#x27;s program to ever create a Value of one of those types.</p>
+<p>Not until now, that is. We&#x27;ll start by adding compiler support for the three new literals: <code>true</code>, <code>false</code>, and <code>nil</code>. They&#x27;re all pretty simple, so we&#x27;ll do all three in a single batch.</p>
+<p>With number literals, we had to deal with the fact that there are billions of possible numeric values. We attended to that by storing the literal&#x27;s value in the chunk&#x27;s constant table and emitting a bytecode instruction that simply loaded that constant. We could do the same thing for the new types. We&#x27;d store, say, <code>true</code>, in the constant table, and use an <code>OP_CONSTANT</code> to read it out.</p>
+<p>But given that there are literally (heh) only three possible values we need to worry about with these new types, it&#x27;s gratuitous -- and &lt;span name=&quot;small&quot;&gt;slow!&lt;/span&gt; -- to waste a two-byte instruction and a constant table entry on them. Instead, we&#x27;ll define three dedicated instructions to push each of these literals on the stack.</p>
+<p>&lt;aside name=&quot;small&quot; class=&quot;bottom&quot;&gt;</p>
+<p>I&#x27;m not kidding about dedicated operations for certain constant values being faster. A bytecode VM spends much of its execution time reading and decoding instructions. The fewer, simpler instructions you need for a given piece of behavior, the faster it goes. Short instructions dedicated to common operations are a classic optimization.</p>
+<p>For example, the Java bytecode instruction set has dedicated instructions for loading 0.0, 1.0, 2.0, and the integer values from -1 through 5. (This ends up being a vestigial optimization given that most mature JVMs now JIT-compile the bytecode to machine code before execution anyway.)</p>
+<p>&lt;/aside&gt;</p>
+<p>^code literal-ops (1 before, 1 after)</p>
+<p>Our scanner already treats <code>true</code>, <code>false</code>, and <code>nil</code> as keywords, so we can skip right to the parser. With our table-based Pratt parser, we just need to slot parser functions into the rows associated with those keyword token types. We&#x27;ll use the same function in all three slots. Here:</p>
+<p>^code table-false (1 before, 1 after)</p>
+<p>Here:</p>
+<p>^code table-true (1 before, 1 after)</p>
+<p>And here:</p>
+<p>^code table-nil (1 before, 1 after)</p>
+<p>When the parser encounters <code>false</code>, <code>nil</code>, or <code>true</code>, in prefix position, it calls this new parser function:</p>
+<p>^code parse-literal</p>
+<p>Since <code>parsePrecedence()</code> has already consumed the keyword token, all we need to do is output the proper instruction. We &lt;span name=&quot;switch&quot;&gt;figure&lt;/span&gt; that out based on the type of token we parsed. Our front end can now compile Boolean and nil literals to bytecode. Moving down the execution pipeline, we reach the interpreter.</p>
+<p>&lt;aside name=&quot;switch&quot;&gt;</p>
+<p>We could have used separate parser functions for each literal and saved ourselves a switch but that felt needlessly verbose to me. I think it&#x27;s mostly a matter of taste.</p>
+<p>&lt;/aside&gt;</p>
+<p>^code interpret-literals (5 before, 1 after)</p>
+<p>This is pretty self-explanatory. Each instruction summons the appropriate value and pushes it onto the stack. We shouldn&#x27;t forget our disassembler either.</p>
+<p>^code disassemble-literals (2 before, 1 after)</p>
+<p>With this in place, we can run this Earth-shattering program:</p>
+<pre class="lox"><code>true</code></pre>
+<p>Except that when the interpreter tries to print the result, it blows up. We need to extend <code>printValue()</code> to handle the new types too:</p>
+<p>^code print-value (1 before, 1 after)</p>
+<p>There we go! Now we have some new types. They just aren&#x27;t very useful yet. Aside from the literals, you can&#x27;t really <em>do</em> anything with them. It will be a while before <code>nil</code> comes into play, but we can start putting Booleans to work in the logical operators.</p>
+<h3>Logical not and falsiness</h3>
+<p>The simplest logical operator is our old exclamatory friend unary not.</p>
+<pre class="lox"><code>print !true; // &quot;false&quot;</code></pre>
+<p>This new operation gets a new instruction.</p>
+<p>^code not-op (1 before, 1 after)</p>
+<p>We can reuse the <code>unary()</code> parser function we wrote for unary negation to compile a not expression. We just need to slot it into the parsing table.</p>
+<p>^code table-not (1 before, 1 after)</p>
+<p>Because I knew we were going to do this, the <code>unary()</code> function already has a switch on the token type to figure out which bytecode instruction to output. We merely add another case.</p>
+<p>^code compile-not (1 before, 3 after)</p>
+<p>That&#x27;s it for the front end. Let&#x27;s head over to the VM and conjure this instruction into life.</p>
+<p>^code op-not (1 before, 1 after)</p>
+<p>Like our previous unary operator, it pops the one operand, performs the operation, and pushes the result. And, as we did there, we have to worry about dynamic typing. Taking the logical not of <code>true</code> is easy, but there&#x27;s nothing preventing an unruly programmer from writing something like this:</p>
+<pre class="lox"><code>print !nil;</code></pre>
+<p>For unary minus, we made it an error to negate anything that isn&#x27;t a &lt;span name=&quot;negate&quot;&gt;number&lt;/span&gt;. But Lox, like most scripting languages, is more permissive when it comes to <code>!</code> and other contexts where a Boolean is expected. The rule for how other types are handled is called &quot;falsiness&quot;, and we implement it here:</p>
+<p>&lt;aside name=&quot;negate&quot;&gt;</p>
+<p>Now I can&#x27;t help but try to figure out what it would mean to negate other types of values. <code>nil</code> is probably its own negation, sort of like a weird pseudo-zero. Negating a string could, uh, reverse it?</p>
+<p>&lt;/aside&gt;</p>
+<p>^code is-falsey</p>
+<p>Lox follows Ruby in that <code>nil</code> and <code>false</code> are falsey and every other value behaves like <code>true</code>. We&#x27;ve got a new instruction we can generate, so we also need to be able to <em>un</em>generate it in the disassembler.</p>
+<p>^code disassemble-not (2 before, 1 after)</p>
+<h3>Equality and comparison operators</h3>
+<p>That wasn&#x27;t too bad. Let&#x27;s keep the momentum going and knock out the equality and comparison operators too: <code>==</code>, <code>!=</code>, <code>&lt;</code>, <code>&gt;</code>, <code>&lt;=</code>, and <code>&gt;=</code>. That covers all of the operators that return Boolean results except the logical operators <code>and</code> and <code>or</code>. Since those need to short-circuit (basically do a little control flow) we aren&#x27;t ready for them yet.</p>
+<p>Here are the new instructions for those operators:</p>
+<p>^code comparison-ops (1 before, 1 after)</p>
+<p>Wait, only three? What about <code>!=</code>, <code>&lt;=</code>, and <code>&gt;=</code>? We could create instructions for those too. Honestly, the VM would execute faster if we did, so we <em>should</em> do that if the goal is performance.</p>
+<p>But my main goal is to teach you about bytecode compilers. I want you to start internalizing the idea that the bytecode instructions don&#x27;t need to closely follow the user&#x27;s source code. The VM has total freedom to use whatever instruction set and code sequences it wants as long as they have the right user-visible behavior.</p>
+<p>The expression <code>a != b</code> has the same semantics as <code>!(a == b)</code>, so the compiler is free to compile the former as if it were the latter. Instead of a dedicated <code>OP_NOT_EQUAL</code> instruction, it can output an <code>OP_EQUAL</code> followed by an <code>OP_NOT</code>. Likewise, <code>a &lt;= b</code> is the &lt;span name=&quot;same&quot;&gt;same&lt;/span&gt; as <code>!(a &gt; b)</code> and `a &gt;= b<code> is </code>!(a &lt; b)`. Thus, we only need three new instructions.</p>
+<p>&lt;aside name=&quot;same&quot; class=&quot;bottom&quot;&gt;</p>
+<p><em>Is</em> <code>a &lt;= b</code> always the same as <code>!(a &gt; b)</code>? According to [IEEE 754][</p>
+<p>], all comparison operators return false when an operand is NaN. That means <code>NaN &lt;= 1</code> is false and <code>NaN &gt; 1</code> is also false. But our desugaring assumes the latter is always the negation of the former.</p>
+<p>For the book, we won&#x27;t get hung up on this, but these kinds of details will matter in your real language implementations.</p>
+<p>[ieee 754]: https://en.wikipedia.org/wiki/IEEE_754</p>
+<p>&lt;/aside&gt;</p>
+<p>Over in the parser, though, we do have six new operators to slot into the parse table. We use the same <code>binary()</code> parser function from before. Here&#x27;s the row for <code>!=</code>:</p>
+<p>^code table-equal (1 before, 1 after)</p>
+<p>The remaining five operators are a little farther down in the table.</p>
+<p>^code table-comparisons (1 before, 1 after)</p>
+<p>Inside <code>binary()</code> we already have a switch to generate the right bytecode for each token type. We add cases for the six new operators.</p>
+<p>^code comparison-operators (1 before, 1 after)</p>
+<p>The <code>==</code>, <code>&lt;</code>, and <code>&gt;</code> operators output a single instruction. The others output a pair of instructions, one to evalute the inverse operation, and then an <code>OP_NOT</code> to flip the result. Six operators for the price of three instructions!</p>
+<p>That means over in the VM, our job is simpler. Equality is the most general operation.</p>
+<p>^code interpret-equal (1 before, 1 after)</p>
+<p>You can evaluate <code>==</code> on any pair of objects, even objects of different types. There&#x27;s enough complexity that it makes sense to shunt that logic over to a separate function. That function always returns a C <code>bool</code>, so we can safely wrap the result in a <code>BOOL_VAL</code>. The function relates to Values, so it lives over in the &quot;value&quot; module.</p>
+<p>^code values-equal-h (2 before, 1 after)</p>
+<p>And here&#x27;s the implementation:</p>
+<p>^code values-equal</p>
+<p>First, we check the types. If the Values have &lt;span name=&quot;equal&quot;&gt;different&lt;/span&gt; types, they are definitely not equal. Otherwise, we unwrap the two Values and compare them directly.</p>
+<p>&lt;aside name=&quot;equal&quot;&gt;</p>
+<p>Some languages have &quot;implicit conversions&quot; where values of different types may be considered equal if one can be converted to the other&#x27;s type. For example, the number 0 is equivalent to the string &quot;0&quot; in JavaScript. This looseness was a large enough source of pain that JS added a separate &quot;strict equality&quot; operator, <code>===</code>.</p>
+<p>PHP considers the strings &quot;1&quot; and &quot;01&quot; to be equivalent because both can be converted to equivalent numbers, though the ultimate reason is because PHP was designed by a Lovecraftian eldritch god to destroy the mind.</p>
+<p>Most dynamically typed languages that have separate integer and floating-point number types consider values of different number types equal if the numeric values are the same (so, say, 1.0 is equal to 1), though even that seemingly innocuous convenience can bite the unwary.</p>
+<p>&lt;/aside&gt;</p>
+<p>For each value type, we have a separate case that handles comparing the value itself. Given how similar the cases are, you might wonder why we can&#x27;t simply <code>memcmp()</code> the two Value structs and be done with it. The problem is that because of padding and different-sized union fields, a Value contains unused bits. C gives no guarantee about what is in those, so it&#x27;s possible that two equal Values actually differ in memory that isn&#x27;t used.</p>
+<p>&lt;img src=&quot;image/types-of-values/memcmp.png&quot; alt=&quot;The memory respresentations of two equal values that differ in unused bytes.&quot; /&gt;</p>
+<p>(You wouldn&#x27;t believe how much pain I went through before learning this fact.)</p>
+<p>Anyway, as we add more types to clox, this function will grow new cases. For now, these three are sufficient. The other comparison operators are easier since they work only on numbers.</p>
+<p>^code interpret-comparison (3 before, 1 after)</p>
+<p>We already extended the <code>BINARY_OP</code> macro to handle operators that return non-numeric types. Now we get to use that. We pass in <code>BOOL_VAL</code> since the result value type is Boolean. Otherwise, it&#x27;s no different from plus or minus.</p>
+<p>As always, the coda to today&#x27;s aria is disassembling the new instructions.</p>
+<p>^code disassemble-comparison (2 before, 1 after)</p>
+<p>With that, our numeric calculator has become something closer to a general expression evaluator. Fire up clox and type in:</p>
+<pre class="lox"><code>!(5 - 4 &gt; 3 * 2 == !nil)</code></pre>
+<p>OK, I&#x27;ll admit that&#x27;s maybe not the most <em>useful</em> expression, but we&#x27;re making progress. We have one missing built-in type with its own literal form: strings. Those are much more complex because strings can vary in size. That tiny difference turns out to have implications so large that we give strings [their very own chapter][strings</p>
+<p>].</p>
+<p>[strings]: strings.html</p>
+<p>&lt;div class=&quot;challenges&quot;&gt;</p>
+<h2>Challenges</h2>
+<p>1. We could reduce our binary operators even further than we did here. Which    other instructions can you eliminate, and how would the compiler cope with    their absence?</p>
+<p>2. Conversely, we can improve the speed of our bytecode VM by adding more    specific instructions that correspond to higher-level operations. What    instructions would you define to speed up the kind of user code we added    support for in this chapter?</p>
+<p>&lt;/div&gt; </p>

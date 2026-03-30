@@ -1,0 +1,393 @@
+<blockquote> If you find that you&#x27;re spending almost all your time on theory, start turning</blockquote><blockquote> some attention to practical things; it will improve your theories. If you find</blockquote><blockquote> that you&#x27;re spending almost all your time on practice, start turning some</blockquote><blockquote> attention to theoretical things; it will improve your practice.</blockquote><blockquote></blockquote><blockquote> &lt;cite&gt;Donald Knuth&lt;/cite&gt;</blockquote><p>We already have ourselves a complete implementation of Lox with jlox, so why isn&#x27;t the book over yet? Part of this is because jlox relies on the &lt;span name=&quot;metal&quot;&gt;JVM&lt;/span&gt; to do lots of things for us. If we want to understand how an interpreter works all the way down to the metal, we need to build those bits and pieces ourselves.</p>
+<p>&lt;aside name=&quot;metal&quot;&gt;</p>
+<p>Of course, our second interpreter relies on the C standard library for basics like memory allocation, and the C compiler frees us from details of the underlying machine code we&#x27;re running it on. Heck, that machine code is probably implemented in terms of microcode on the chip. And the C runtime relies on the operating system to hand out pages of memory. But we have to stop <em>somewhere</em> if this book is going to fit on your bookshelf.</p>
+<p>&lt;/aside&gt;</p>
+<p>An even more fundamental reason that jlox isn&#x27;t sufficient is that it&#x27;s too damn slow. A tree-walk interpreter is fine for some kinds of high-level, declarative languages. But for a general-purpose, imperative language -- even a &quot;scripting&quot; language like Lox -- it won&#x27;t fly. Take this little script:</p>
+<pre class="lox"><code>fun fib(n) {
+  if (n &lt; 2) return n;
+  return fib(n - 1) + fib(n - 2); // [fib]
+}
+
+var before = clock();
+print fib(40);
+var after = clock();
+print after - before;</code></pre>
+<p>&lt;aside name=&quot;fib&quot;&gt;</p>
+<p>This is a comically inefficient way to actually calculate Fibonacci numbers. Our goal is to see how fast the <em>interpreter</em> runs, not to see how fast of a program we can write. A slow program that does a lot of work -- pointless or not -- is a good test case for that.</p>
+<p>&lt;/aside&gt;</p>
+<p>On my laptop, that takes jlox about 72 seconds to execute. An equivalent C program finishes in half a second. Our dynamically typed scripting language is never going to be as fast as a statically typed language with manual memory management, but we don&#x27;t need to settle for more than <em>two orders of magnitude</em> slower.</p>
+<p>We could take jlox and run it in a profiler and start tuning and tweaking hotspots, but that will only get us so far. The execution model -- walking the AST -- is fundamentally the wrong design. We can&#x27;t micro-optimize that to the performance we want any more than you can polish an AMC Gremlin into an SR-71 Blackbird.</p>
+<p>We need to rethink the core model. This chapter introduces that model, bytecode, and begins our new interpreter, clox.</p>
+<h2>Bytecode?</h2>
+<p>In engineering, few choices are without trade-offs. To best understand why we&#x27;re going with bytecode, let&#x27;s stack it up against a couple of alternatives.</p>
+<h3>Why not walk the AST?</h3>
+<p>Our existing interpreter has a couple of things going for it:</p>
+<ul>
+<li>  Well, first, we already wrote it. It&#x27;s done. And the main reason it&#x27;s done</li>
+</ul>
+<p>    is because this style of interpreter is <em>really simple to implement</em>. The     runtime representation of the code directly maps to the syntax. It&#x27;s     virtually effortless to get from the parser to the data structures we need     at runtime.</p>
+<ul>
+<li>  It&#x27;s <em>portable</em>. Our current interpreter is written in Java and runs on any</li>
+</ul>
+<p>    platform Java supports. We could write a new implementation in C using the     same approach and compile and run our language on basically every platform     under the sun.</p>
+<p>Those are real advantages. But, on the other hand, it&#x27;s <em>not memory-efficient</em>. Each piece of syntax becomes an AST node. A tiny Lox expression like <code>1 + 2</code> turns into a slew of objects with lots of pointers between them, something like:</p>
+<p>&lt;span name=&quot;header&quot;&gt;&lt;/span&gt;</p>
+<p>&lt;aside name=&quot;header&quot;&gt;</p>
+<p>The &quot;(header)&quot; parts are the bookkeeping information the Java virtual machine uses to support memory management and store the object&#x27;s type. Those take up space too!</p>
+<p>&lt;/aside&gt;</p>
+<p>&lt;img src=&quot;image/chunks-of-bytecode/ast.png&quot; alt=&quot;The tree of Java objects created to represent &#x27;1 + 2&#x27;.&quot; /&gt;</p>
+<p>Each of those pointers adds an extra 32 or 64 bits of overhead to the object. Worse, sprinkling our data across the heap in a loosely connected web of objects does bad things for &lt;span name=&quot;locality&quot;&gt;<em>spatial locality</em>&lt;/span&gt;.</p>
+<p>&lt;aside name=&quot;locality&quot;&gt;</p>
+<p>I wrote [an entire chapter][gpp locality</p>
+<p>] about this exact problem in my first book, <em>Game Programming Patterns</em>, if you want to really dig in.</p>
+<p>[gpp locality]: http://gameprogrammingpatterns.com/data-locality.html</p>
+<p>&lt;/aside&gt;</p>
+<p>Modern CPUs process data way faster than they can pull it from RAM. To compensate for that, chips have multiple layers of caching. If a piece of memory it needs is already in the cache, it can be loaded more quickly. We&#x27;re talking upwards of 100 <em>times</em> faster.</p>
+<p>How does data get into that cache? The machine speculatively stuffs things in there for you. Its heuristic is pretty simple. Whenever the CPU reads a bit of data from RAM, it pulls in a whole little bundle of adjacent bytes and stuffs them in the cache.</p>
+<p>If our program next requests some data close enough to be inside that cache line, our CPU runs like a well-oiled conveyor belt in a factory. We <em>really</em> want to take advantage of this. To use the cache effectively, the way we represent code in memory should be dense and ordered like it&#x27;s read.</p>
+<p>Now look up at that tree. Those sub-objects could be &lt;span name=&quot;anywhere&quot;&gt;<em>anywhere</em>&lt;/span&gt;. Every step the tree-walker takes where it follows a reference to a child node may step outside the bounds of the cache and force the CPU to stall until a new lump of data can be slurped in from RAM. Just the <em>overhead</em> of those tree nodes with all of their pointer fields and object headers tends to push objects away from each other and out of the cache.</p>
+<p>&lt;aside name=&quot;anywhere&quot;&gt;</p>
+<p>Even if the objects happened to be allocated in sequential memory when the parser first produced them, after a couple of rounds of garbage collection -- which may move objects around in memory -- there&#x27;s no telling where they&#x27;ll be.</p>
+<p>&lt;/aside&gt;</p>
+<p>Our AST walker has other overhead too around interface dispatch and the Visitor pattern, but the locality issues alone are enough to justify a better code representation.</p>
+<h3>Why not compile to native code?</h3>
+<p>If you want to go <em>real</em> fast, you want to get all of those layers of indirection out of the way. Right down to the metal. Machine code. It even <em>sounds</em> fast. <em>Machine code.</em></p>
+<p>Compiling directly to the native instruction set the chip supports is what the fastest languages do. Targeting native code has been the most efficient option since way back in the early days when engineers actually &lt;span name=&quot;hand&quot;&gt;handwrote&lt;/span&gt; programs in machine code.</p>
+<p>&lt;aside name=&quot;hand&quot;&gt;</p>
+<p>Yes, they actually wrote machine code by hand. On punched cards. Which, presumably, they punched <em>with their fists</em>.</p>
+<p>&lt;/aside&gt;</p>
+<p>If you&#x27;ve never written any machine code, or its slightly more human-palatable cousin assembly code before, I&#x27;ll give you the gentlest of introductions. Native code is a dense series of operations, encoded directly in binary. Each instruction is between one and a few bytes long, and is almost mind-numbingly low level. &quot;Move a value from this address to this register.&quot; &quot;Add the integers in these two registers.&quot; Stuff like that.</p>
+<p>The CPU cranks through the instructions, decoding and executing each one in order. There is no tree structure like our AST, and control flow is handled by jumping from one point in the code directly to another. No indirection, no overhead, no unnecessary skipping around or chasing pointers.</p>
+<p>Lightning fast, but that performance comes at a cost. First of all, compiling to native code ain&#x27;t easy. Most chips in wide use today have sprawling Byzantine architectures with heaps of instructions that accreted over decades. They require sophisticated register allocation, pipelining, and instruction scheduling.</p>
+<p>And, of course, you&#x27;ve thrown &lt;span name=&quot;back&quot;&gt;portability&lt;/span&gt; out. Spend a few years mastering some architecture and that still only gets you onto <em>one</em> of the several popular instruction sets out there. To get your language on all of them, you need to learn all of their instruction sets and write a separate back end for each one.</p>
+<p>&lt;aside name=&quot;back&quot;&gt;</p>
+<p>The situation isn&#x27;t entirely dire. A well-architected compiler lets you share the front end and most of the middle layer optimization passes across the different architectures you support. It&#x27;s mainly the code generation and some of the details around instruction selection that you&#x27;ll need to write afresh each time.</p>
+<p>The [LLVM][</p>
+<p>] project gives you some of this out of the box. If your compiler outputs LLVM&#x27;s own special intermediate language, LLVM in turn compiles that to native code for a plethora of architectures.</p>
+<p>[llvm]: https://llvm.org/</p>
+<p>&lt;/aside&gt;</p>
+<h3>What is bytecode?</h3>
+<p>Fix those two points in your mind. On one end, a tree-walk interpreter is simple, portable, and slow. On the other, native code is complex and platform-specific but fast. Bytecode sits in the middle. It retains the portability of a tree-walker -- we won&#x27;t be getting our hands dirty with assembly code in this book. It sacrifices <em>some</em> simplicity to get a performance boost in return, though not as fast as going fully native.</p>
+<p>Structurally, bytecode resembles machine code. It&#x27;s a dense, linear sequence of binary instructions. That keeps overhead low and plays nice with the cache. However, it&#x27;s a much simpler, higher-level instruction set than any real chip out there. (In many bytecode formats, each instruction is only a single byte long, hence &quot;bytecode&quot;.)</p>
+<p>Imagine you&#x27;re writing a native compiler from some source language and you&#x27;re given carte blanche to define the easiest possible architecture to target. Bytecode is kind of like that. It&#x27;s an idealized fantasy instruction set that makes your life as the compiler writer easier.</p>
+<p>The problem with a fantasy architecture, of course, is that it doesn&#x27;t exist. We solve that by writing an <em>emulator</em> -- a simulated chip written in software that interprets the bytecode one instruction at a time. A <em>virtual machine (VM)</em>, if you will.</p>
+<p>That emulation layer adds &lt;span name=&quot;p-code&quot;&gt;overhead&lt;/span&gt;, which is a key reason bytecode is slower than native code. But in return, it gives us portability. Write our VM in a language like C that is already supported on all the machines we care about, and we can run our emulator on top of any hardware we like.</p>
+<p>&lt;aside name=&quot;p-code&quot;&gt;</p>
+<p>One of the first bytecode formats was [p-code][</p>
+<p>], developed for Niklaus Wirth&#x27;s Pascal language. You might think a PDP-11 running at 15MHz couldn&#x27;t afford the overhead of emulating a virtual machine. But back then, computers were in their Cambrian explosion and new architectures appeared every day. Keeping up with the latest chips was worth more than squeezing the maximum performance from each one. That&#x27;s why the &quot;p&quot; in p-code doesn&#x27;t stand for &quot;Pascal&quot;, but &quot;portable&quot;.</p>
+<p>[p-code]: https://en.wikipedia.org/wiki/P-code_machine</p>
+<p>&lt;/aside&gt;</p>
+<p>This is the path we&#x27;ll take with our new interpreter, clox. We&#x27;ll follow in the footsteps of the main implementations of Python, Ruby, Lua, OCaml, Erlang, and others. In many ways, our VM&#x27;s design will parallel the structure of our previous interpreter:</p>
+<p>&lt;img src=&quot;image/chunks-of-bytecode/phases.png&quot; alt=&quot;Phases of the two implementations. jlox is Parser to Syntax Trees to Interpreter. clox is Compiler to Bytecode to Virtual Machine.&quot; /&gt;</p>
+<p>Of course, we won&#x27;t implement the phases strictly in order. Like our previous interpreter, we&#x27;ll bounce around, building up the implementation one language feature at a time. In this chapter, we&#x27;ll get the skeleton of the application in place and create the data structures needed to store and represent a chunk of bytecode.</p>
+<h2>Getting Started</h2>
+<p>Where else to begin, but at <code>main()</code>? &lt;span name=&quot;ready&quot;&gt;Fire&lt;/span&gt; up your trusty text editor and start typing.</p>
+<p>&lt;aside name=&quot;ready&quot;&gt;</p>
+<p>Now is a good time to stretch, maybe crack your knuckles. A little montage music wouldn&#x27;t hurt either.</p>
+<p>&lt;/aside&gt;</p>
+<p>^code main-c</p>
+<p>From this tiny seed, we will grow our entire VM. Since C provides us with so little, we first need to spend some time amending the soil. Some of that goes into this header:</p>
+<p>^code common-h</p>
+<p>There are a handful of types and constants we&#x27;ll use throughout the interpreter, and this is a convenient place to put them. For now, it&#x27;s the venerable <code>NULL</code>, <code>size_t</code>, the nice C99 Boolean <code>bool</code>, and explicit-sized integer types -- <code>uint8_t</code> and friends.</p>
+<h2>Chunks of Instructions</h2>
+<p>Next, we need a module to define our code representation. I&#x27;ve been using &quot;chunk&quot; to refer to sequences of bytecode, so let&#x27;s make that the official name for that module.</p>
+<p>^code chunk-h</p>
+<p>In our bytecode format, each instruction has a one-byte <strong>operation code</strong> (universally shortened to <strong>opcode</strong>). That number controls what kind of instruction we&#x27;re dealing with -- add, subtract, look up variable, etc. We define those here:</p>
+<p>^code op-enum (1 before, 2 after)</p>
+<p>For now, we start with a single instruction, <code>OP_RETURN</code>. When we have a full-featured VM, this instruction will mean &quot;return from the current function&quot;. I admit this isn&#x27;t exactly useful yet, but we have to start somewhere, and this is a particularly simple instruction, for reasons we&#x27;ll get to later.</p>
+<h3>A dynamic array of instructions</h3>
+<p>Bytecode is a series of instructions. Eventually, we&#x27;ll store some other data along with the instructions, so let&#x27;s go ahead and create a struct to hold it all.</p>
+<p>^code chunk-struct (1 before, 2 after)</p>
+<p>At the moment, this is simply a wrapper around an array of bytes. Since we don&#x27;t know how big the array needs to be before we start compiling a chunk, it must be dynamic. Dynamic arrays are one of my favorite data structures. That sounds like claiming vanilla is my favorite ice cream &lt;span name=&quot;flavor&quot;&gt;flavor&lt;/span&gt;, but hear me out. Dynamic arrays provide:</p>
+<p>&lt;aside name=&quot;flavor&quot;&gt;</p>
+<p>Butter pecan is actually my favorite.</p>
+<p>&lt;/aside&gt;</p>
+<ul>
+<li>Cache-friendly, dense storage</li>
+</ul>
+<ul>
+<li>Constant-time indexed element lookup</li>
+</ul>
+<ul>
+<li>Constant-time appending to the end of the array</li>
+</ul>
+<p>Those features are exactly why we used dynamic arrays all the time in jlox under the guise of Java&#x27;s ArrayList class. Now that we&#x27;re in C, we get to roll our own. If you&#x27;re rusty on dynamic arrays, the idea is pretty simple. In addition to the array itself, we keep two numbers: the number of elements in the array we have allocated (&quot;capacity&quot;) and how many of those allocated entries are actually in use (&quot;count&quot;).</p>
+<p>^code count-and-capacity (1 before, 2 after)</p>
+<p>When we add an element, if the count is less than the capacity, then there is already available space in the array. We store the new element right in there and bump the count.</p>
+<p>&lt;img src=&quot;image/chunks-of-bytecode/insert.png&quot; alt=&quot;Storing an element in an array that has enough capacity.&quot; /&gt;</p>
+<p>If we have no spare capacity, then the process is a little more involved.</p>
+<p>&lt;img src=&quot;image/chunks-of-bytecode/grow.png&quot; alt=&quot;Growing the dynamic array before storing an element.&quot; class=&quot;wide&quot; /&gt;</p>
+<p>1.  &lt;span name=&quot;amortized&quot;&gt;Allocate&lt;/span&gt; a new array with more capacity. 2.  Copy the existing elements from the old array to the new one. 3.  Store the new <code>capacity</code>. 4.  Delete the old array. 5.  Update <code>code</code> to point to the new array. 6.  Store the element in the new array now that there is room. 7.  Update the <code>count</code>.</p>
+<p>&lt;aside name=&quot;amortized&quot;&gt;</p>
+<p>Copying the existing elements when you grow the array makes it seem like appending an element is <em>O(n)</em>, not <em>O(1)</em> like I said above. However, you need to do this copy step only on <em>some</em> of the appends. Most of the time, there is already extra capacity, so you don&#x27;t need to copy.</p>
+<p>To understand how this works, we need <a href="https://en.wikipedia.org/wiki/Amortized_analysis"><strong>amortized analysis</strong></a>. That shows us that as long as we grow the array by a multiple of its current size, when we average out the cost of a <em>sequence</em> of appends, each append is <em>O(1)</em>.</p>
+<p>&lt;/aside&gt;</p>
+<p>We have our struct ready, so let&#x27;s implement the functions to work with it. C doesn&#x27;t have constructors, so we declare a function to initialize a new chunk.</p>
+<p>^code init-chunk-h (1 before, 2 after)</p>
+<p>And implement it thusly:</p>
+<p>^code chunk-c</p>
+<p>The dynamic array starts off completely empty. We don&#x27;t even allocate a raw array yet. To append a byte to the end of the chunk, we use a new function.</p>
+<p>^code write-chunk-h (1 before, 2 after)</p>
+<p>This is where the interesting work happens.</p>
+<p>^code write-chunk</p>
+<p>The first thing we need to do is see if the current array already has capacity for the new byte. If it doesn&#x27;t, then we first need to grow the array to make room. (We also hit this case on the very first write when the array is <code>NULL</code> and <code>capacity</code> is 0.)</p>
+<p>To grow the array, first we figure out the new capacity and grow the array to that size. Both of those lower-level memory operations are defined in a new module.</p>
+<p>^code chunk-c-include-memory (1 before, 2 after)</p>
+<p>This is enough to get us started.</p>
+<p>^code memory-h</p>
+<p>This macro calculates a new capacity based on a given current capacity. In order to get the performance we want, the important part is that it <em>scales</em> based on the old size. We grow by a factor of two, which is pretty typical. 1.5&amp;times; is another common choice.</p>
+<p>We also handle when the current capacity is zero. In that case, we jump straight to eight elements instead of starting at one. That &lt;span name=&quot;profile&quot;&gt;avoids&lt;/span&gt; a little extra memory churn when the array is very small, at the expense of wasting a few bytes on very small chunks.</p>
+<p>&lt;aside name=&quot;profile&quot;&gt;</p>
+<p>I picked the number eight somewhat arbitrarily for the book. Most dynamic array implementations have a minimum threshold like this. The right way to pick a value for this is to profile against real-world usage and see which constant makes the best performance trade-off between extra grows versus wasted space.</p>
+<p>&lt;/aside&gt;</p>
+<p>Once we know the desired capacity, we create or grow the array to that size using <code>GROW_ARRAY()</code>.</p>
+<p>^code grow-array (2 before, 2 after)</p>
+<p>This macro pretties up a function call to <code>reallocate()</code> where the real work happens. The macro itself takes care of getting the size of the array&#x27;s element type and casting the resulting <code>void*</code> back to a pointer of the right type.</p>
+<p>This <code>reallocate()</code> function is the single function we&#x27;ll use for all dynamic memory management in clox -- allocating memory, freeing it, and changing the size of an existing allocation. Routing all of those operations through a single function will be important later when we add a garbage collector that needs to keep track of how much memory is in use.</p>
+<p>The two size arguments passed to <code>reallocate()</code> control which operation to perform:</p>
+<p>&lt;table&gt;   &lt;thead&gt;     &lt;tr&gt;       &lt;td&gt;oldSize&lt;/td&gt;       &lt;td&gt;newSize&lt;/td&gt;       &lt;td&gt;Operation&lt;/td&gt;     &lt;/tr&gt;   &lt;/thead&gt;   &lt;tbody&gt;     &lt;tr&gt;       &lt;td&gt;0&lt;/td&gt;       &lt;td&gt;Non&amp;#8209;zero&lt;/td&gt;       &lt;td&gt;Allocate new block.&lt;/td&gt;     &lt;/tr&gt;     &lt;tr&gt;       &lt;td&gt;Non&amp;#8209;zero&lt;/td&gt;       &lt;td&gt;0&lt;/td&gt;       &lt;td&gt;Free allocation.&lt;/td&gt;     &lt;/tr&gt;     &lt;tr&gt;       &lt;td&gt;Non&amp;#8209;zero&lt;/td&gt;       &lt;td&gt;Smaller&amp;nbsp;than&amp;nbsp;&lt;code&gt;oldSize&lt;/code&gt;&lt;/td&gt;       &lt;td&gt;Shrink existing allocation.&lt;/td&gt;     &lt;/tr&gt;     &lt;tr&gt;       &lt;td&gt;Non&amp;#8209;zero&lt;/td&gt;       &lt;td&gt;Larger&amp;nbsp;than&amp;nbsp;&lt;code&gt;oldSize&lt;/code&gt;&lt;/td&gt;       &lt;td&gt;Grow existing allocation.&lt;/td&gt;     &lt;/tr&gt;   &lt;/tbody&gt; &lt;/table&gt;</p>
+<p>That sounds like a lot of cases to handle, but here&#x27;s the implementation:</p>
+<p>^code memory-c</p>
+<p>When <code>newSize</code> is zero, we handle the deallocation case ourselves by calling <code>free()</code>. Otherwise, we rely on the C standard library&#x27;s <code>realloc()</code> function. That function conveniently supports the other three aspects of our policy. When <code>oldSize</code> is zero, <code>realloc()</code> is equivalent to calling <code>malloc()</code>.</p>
+<p>The interesting cases are when both <code>oldSize</code> and <code>newSize</code> are not zero. Those tell <code>realloc()</code> to resize the previously allocated block. If the new size is smaller than the existing block of memory, it simply &lt;span name=&quot;shrink&quot;&gt;updates&lt;/span&gt; the size of the block and returns the same pointer you gave it. If the new size is larger, it attempts to grow the existing block of memory.</p>
+<p>It can do that only if the memory after that block isn&#x27;t already in use. If there isn&#x27;t room to grow the block, <code>realloc()</code> instead allocates a <em>new</em> block of memory of the desired size, copies over the old bytes, frees the old block, and then returns a pointer to the new block. Remember, that&#x27;s exactly the behavior we want for our dynamic array.</p>
+<p>Because computers are finite lumps of matter and not the perfect mathematical abstractions computer science theory would have us believe, allocation can fail if there isn&#x27;t enough memory and <code>realloc()</code> will return <code>NULL</code>. We should handle that.</p>
+<p>^code out-of-memory (1 before, 1 after)</p>
+<p>There&#x27;s not really anything <em>useful</em> that our VM can do if it can&#x27;t get the memory it needs, but we at least detect that and abort the process immediately instead of returning a <code>NULL</code> pointer and letting it go off the rails later.</p>
+<p>&lt;aside name=&quot;shrink&quot;&gt;</p>
+<p>Since all we passed in was a bare pointer to the first byte of memory, what does it mean to &quot;update&quot; the block&#x27;s size? Under the hood, the memory allocator maintains additional bookkeeping information for each block of heap-allocated memory, including its size.</p>
+<p>Given a pointer to some previously allocated memory, it can find this bookkeeping information, which is necessary to be able to cleanly free it. It&#x27;s this size metadata that <code>realloc()</code> updates.</p>
+<p>Many implementations of <code>malloc()</code> store the allocated size in memory right <em>before</em> the returned address.</p>
+<p>&lt;/aside&gt;</p>
+<p>OK, we can create new chunks and write instructions to them. Are we done? Nope! We&#x27;re in C now, remember, we have to manage memory ourselves, like in Ye Olden Times, and that means <em>freeing</em> it too.</p>
+<p>^code free-chunk-h (1 before, 1 after)</p>
+<p>The implementation is:</p>
+<p>^code free-chunk</p>
+<p>We deallocate all of the memory and then call <code>initChunk()</code> to zero out the fields leaving the chunk in a well-defined empty state. To free the memory, we add one more macro.</p>
+<p>^code free-array (3 before, 2 after)</p>
+<p>Like <code>GROW_ARRAY()</code>, this is a wrapper around a call to <code>reallocate()</code>. This one frees the memory by passing in zero for the new size. I know, this is a lot of boring low-level stuff. Don&#x27;t worry, we&#x27;ll get a lot of use out of these in later chapters and will get to program at a higher level. Before we can do that, though, we gotta lay our own foundation.</p>
+<h2>Disassembling Chunks</h2>
+<p>Now we have a little module for creating chunks of bytecode. Let&#x27;s try it out by hand-building a sample chunk.</p>
+<p>^code main-chunk (1 before, 1 after)</p>
+<p>Don&#x27;t forget the include.</p>
+<p>^code main-include-chunk (1 before, 2 after)</p>
+<p>Run that and give it a try. Did it work? Uh... who knows? All we&#x27;ve done is push some bytes around in memory. We have no human-friendly way to see what&#x27;s actually inside that chunk we made.</p>
+<p>To fix this, we&#x27;re going to create a <strong>disassembler</strong>. An <strong>assembler</strong> is an old-school program that takes a file containing human-readable mnemonic names for CPU instructions like &quot;ADD&quot; and &quot;MULT&quot; and translates them to their binary machine code equivalent. A <em>dis</em>assembler goes in the other direction -- given a blob of machine code, it spits out a textual listing of the instructions.</p>
+<p>We&#x27;ll implement something &lt;span name=&quot;printer&quot;&gt;similar&lt;/span&gt;. Given a chunk, it will print out all of the instructions in it. A Lox <em>user</em> won&#x27;t use this, but we Lox <em>maintainers</em> will certainly benefit since it gives us a window into the interpreter&#x27;s internal representation of code.</p>
+<p>&lt;aside name=&quot;printer&quot;&gt;</p>
+<p>In jlox, our analogous tool was the [AstPrinter class][</p>
+<p>].</p>
+<p>[astprinter class]: representing-code.html#a-not-very-pretty-printer</p>
+<p>&lt;/aside&gt;</p>
+<p>In <code>main()</code>, after we create the chunk, we pass it to the disassembler.</p>
+<p>^code main-disassemble-chunk (2 before, 1 after)</p>
+<p>Again, we whip up &lt;span name=&quot;module&quot;&gt;yet another&lt;/span&gt; module.</p>
+<p>&lt;aside name=&quot;module&quot;&gt;</p>
+<p>I promise you we won&#x27;t be creating this many new files in later chapters.</p>
+<p>&lt;/aside&gt;</p>
+<p>^code main-include-debug (1 before, 2 after)</p>
+<p>Here&#x27;s that header:</p>
+<p>^code debug-h</p>
+<p>In <code>main()</code>, we call <code>disassembleChunk()</code> to disassemble all of the instructions in the entire chunk. That&#x27;s implemented in terms of the other function, which just disassembles a single instruction. It shows up here in the header because we&#x27;ll call it from the VM in later chapters.</p>
+<p>Here&#x27;s a start at the implementation file:</p>
+<p>^code debug-c</p>
+<p>To disassemble a chunk, we print a little header (so we can tell <em>which</em> chunk we&#x27;re looking at) and then crank through the bytecode, disassembling each instruction. The way we iterate through the code is a little odd. Instead of incrementing <code>offset</code> in the loop, we let <code>disassembleInstruction()</code> do it for us. When we call that function, after disassembling the instruction at the given offset, it returns the offset of the <em>next</em> instruction. This is because, as we&#x27;ll see later, instructions can have different sizes.</p>
+<p>The core of the &quot;debug&quot; module is this function:</p>
+<p>^code disassemble-instruction</p>
+<p>First, it prints the byte offset of the given instruction -- that tells us where in the chunk this instruction is. This will be a helpful signpost when we start doing control flow and jumping around in the bytecode.</p>
+<p>Next, it reads a single byte from the bytecode at the given offset. That&#x27;s our opcode. We &lt;span name=&quot;switch&quot;&gt;switch&lt;/span&gt; on that. For each kind of instruction, we dispatch to a little utility function for displaying it. On the off chance that the given byte doesn&#x27;t look like an instruction at all -- a bug in our compiler -- we print that too. For the one instruction we do have, <code>OP_RETURN</code>, the display function is:</p>
+<p>&lt;aside name=&quot;switch&quot;&gt;</p>
+<p>We have only one instruction right now, but this switch will grow throughout the rest of the book.</p>
+<p>&lt;/aside&gt;</p>
+<p>^code simple-instruction</p>
+<p>There isn&#x27;t much to a return instruction, so all it does is print the name of the opcode, then return the next byte offset past this instruction. Other instructions will have more going on.</p>
+<p>If we run our nascent interpreter now, it actually prints something:</p>
+<pre class="text"><code>== test chunk ==
+0000 OP_RETURN</code></pre>
+<p>It worked! This is sort of the &quot;Hello, world!&quot; of our code representation. We can create a chunk, write an instruction to it, and then extract that instruction back out. Our encoding and decoding of the binary bytecode is working.</p>
+<h2>Constants</h2>
+<p>Now that we have a rudimentary chunk structure working, let&#x27;s start making it more useful. We can store <em>code</em> in chunks, but what about <em>data</em>? Many values the interpreter works with are created at runtime as the result of operations.</p>
+<pre class="lox"><code>1 + 2;</code></pre>
+<p>The value 3 appears nowhere in the code here. However, the literals <code>1</code> and <code>2</code> do. To compile that statement to bytecode, we need some sort of instruction that means &quot;produce a constant&quot; and those literal values need to get stored in the chunk somewhere. In jlox, the Expr.Literal AST node held the value. We need a different solution now that we don&#x27;t have a syntax tree.</p>
+<h3>Representing values</h3>
+<p>We won&#x27;t be <em>running</em> any code in this chapter, but since constants have a foot in both the static and dynamic worlds of our interpreter, they force us to start thinking at least a little bit about how our VM should represent values.</p>
+<p>For now, we&#x27;re going to start as simple as possible -- we&#x27;ll support only double-precision, floating-point numbers. This will obviously expand over time, so we&#x27;ll set up a new module to give ourselves room to grow.</p>
+<p>^code value-h</p>
+<p>This typedef abstracts how Lox values are concretely represented in C. That way, we can change that representation without needing to go back and fix existing code that passes around values.</p>
+<p>Back to the question of where to store constants in a chunk. For small fixed-size values like integers, many instruction sets store the value directly in the code stream right after the opcode. These are called <strong>immediate instructions</strong> because the bits for the value are immediately after the opcode.</p>
+<p>That doesn&#x27;t work well for large or variable-sized constants like strings. In a native compiler to machine code, those bigger constants get stored in a separate &quot;constant data&quot; region in the binary executable. Then, the instruction to load a constant has an address or offset pointing to where the value is stored in that section.</p>
+<p>Most virtual machines do something similar. For example, the Java Virtual Machine [associates a <strong>constant pool</strong>][jvm const</p>
+<p>] with each compiled class. That sounds good enough for clox to me. Each chunk will carry with it a list of the values that appear as literals in the program. To keep things &lt;span name=&quot;immediate&quot;&gt;simpler&lt;/span&gt;, we&#x27;ll put <em>all</em> constants in there, even simple integers.</p>
+<p>[jvm const]: https://docs.oracle.com/javase/specs/jvms/se7/html/jvms-4.html#jvms-4.4</p>
+<p>&lt;aside name=&quot;immediate&quot;&gt;</p>
+<p>In addition to needing two kinds of constant instructions -- one for immediate values and one for constants in the constant table -- immediates also force us to worry about alignment, padding, and endianness. Some architectures aren&#x27;t happy if you try to say, stuff a 4-byte integer at an odd address.</p>
+<p>&lt;/aside&gt;</p>
+<h3>Value arrays</h3>
+<p>The constant pool is an array of values. The instruction to load a constant looks up the value by index in that array. As with our &lt;span name=&quot;generic&quot;&gt;bytecode&lt;/span&gt; array, the compiler doesn&#x27;t know how big the array needs to be ahead of time. So, again, we need a dynamic one. Since C doesn&#x27;t have generic data structures, we&#x27;ll write another dynamic array data structure, this time for Value.</p>
+<p>&lt;aside name=&quot;generic&quot;&gt;</p>
+<p>Defining a new struct and manipulation functions each time we need a dynamic array of a different type is a chore. We could cobble together some preprocessor macros to fake generics, but that&#x27;s overkill for clox. We won&#x27;t need many more of these.</p>
+<p>&lt;/aside&gt;</p>
+<p>^code value-array (1 before, 2 after)</p>
+<p>As with the bytecode array in Chunk, this struct wraps a pointer to an array along with its allocated capacity and the number of elements in use. We also need the same three functions to work with value arrays.</p>
+<p>^code array-fns-h (1 before, 2 after)</p>
+<p>The implementations will probably give you déjà vu. First, to create a new one:</p>
+<p>^code value-c</p>
+<p>Once we have an initialized array, we can start &lt;span name=&quot;add&quot;&gt;adding&lt;/span&gt; values to it.</p>
+<p>&lt;aside name=&quot;add&quot;&gt;</p>
+<p>Fortunately, we don&#x27;t need other operations like insertion and removal.</p>
+<p>&lt;/aside&gt;</p>
+<p>^code write-value-array</p>
+<p>The memory-management macros we wrote earlier do let us reuse some of the logic from the code array, so this isn&#x27;t too bad. Finally, to release all memory used by the array:</p>
+<p>^code free-value-array</p>
+<p>Now that we have growable arrays of values, we can add one to Chunk to store the chunk&#x27;s constants.</p>
+<p>^code chunk-constants (1 before, 1 after)</p>
+<p>Don&#x27;t forget the include.</p>
+<p>^code chunk-h-include-value (1 before, 2 after)</p>
+<p>Ah, C, and its Stone Age modularity story. Where were we? Right. When we initialize a new chunk, we initialize its constant list too.</p>
+<p>^code chunk-init-constant-array (1 before, 1 after)</p>
+<p>Likewise, we free the constants when we free the chunk.</p>
+<p>^code chunk-free-constants (1 before, 1 after)</p>
+<p>Next, we define a convenience method to add a new constant to the chunk. Our yet-to-be-written compiler could write to the constant array inside Chunk directly -- it&#x27;s not like C has private fields or anything -- but it&#x27;s a little nicer to add an explicit function.</p>
+<p>^code add-constant-h (1 before, 2 after)</p>
+<p>Then we implement it.</p>
+<p>^code add-constant</p>
+<p>After we add the constant, we return the index where the constant was appended so that we can locate that same constant later.</p>
+<h3>Constant instructions</h3>
+<p>We can <em>store</em> constants in chunks, but we also need to <em>execute</em> them. In a piece of code like:</p>
+<pre class="lox"><code>print 1;
+print 2;</code></pre>
+<p>The compiled chunk needs to not only contain the values 1 and 2, but know <em>when</em> to produce them so that they are printed in the right order. Thus, we need an instruction that produces a particular constant.</p>
+<p>^code op-constant (1 before, 1 after)</p>
+<p>When the VM executes a constant instruction, it &lt;span name=&quot;load&quot;&gt;&quot;loads&quot;&lt;/span&gt; the constant for use. This new instruction is a little more complex than <code>OP_RETURN</code>. In the above example, we load two different constants. A single bare opcode isn&#x27;t enough to know <em>which</em> constant to load.</p>
+<p>&lt;aside name=&quot;load&quot;&gt;</p>
+<p>I&#x27;m being vague about what it means to &quot;load&quot; or &quot;produce&quot; a constant because we haven&#x27;t learned how the virtual machine actually executes code at runtime yet. For that, you&#x27;ll have to wait until you get to (or skip ahead to, I suppose) the [next chapter][vm</p>
+<p>].</p>
+<p>[vm]: a-virtual-machine.html</p>
+<p>&lt;/aside&gt;</p>
+<p>To handle cases like this, our bytecode -- like most others -- allows instructions to have &lt;span name=&quot;operand&quot;&gt;<strong>operands</strong>&lt;/span&gt;. These are stored as binary data immediately after the opcode in the instruction stream and let us parameterize what the instruction does.</p>
+<p>&lt;img src=&quot;image/chunks-of-bytecode/format.png&quot; alt=&quot;OP_CONSTANT is a byte for the opcode followed by a byte for the constant index.&quot; /&gt;</p>
+<p>Each opcode determines how many operand bytes it has and what they mean. For example, a simple operation like &quot;return&quot; may have no operands, where an instruction for &quot;load local variable&quot; needs an operand to identify which variable to load. Each time we add a new opcode to clox, we specify what its operands look like -- its <strong>instruction format</strong>.</p>
+<p>&lt;aside name=&quot;operand&quot;&gt;</p>
+<p>Bytecode instruction operands are <em>not</em> the same as the operands passed to an arithmetic operator. You&#x27;ll see when we get to expressions that arithmetic operand values are tracked separately. Instruction operands are a lower-level notion that modify how the bytecode instruction itself behaves.</p>
+<p>&lt;/aside&gt;</p>
+<p>In this case, <code>OP_CONSTANT</code> takes a single byte operand that specifies which constant to load from the chunk&#x27;s constant array. Since we don&#x27;t have a compiler yet, we &quot;hand-compile&quot; an instruction in our test chunk.</p>
+<p>^code main-constant (1 before, 1 after)</p>
+<p>We add the constant value itself to the chunk&#x27;s constant pool. That returns the index of the constant in the array. Then we write the constant instruction, starting with its opcode. After that, we write the one-byte constant index operand. Note that <code>writeChunk()</code> can write opcodes or operands. It&#x27;s all raw bytes as far as that function is concerned.</p>
+<p>If we try to run this now, the disassembler is going to yell at us because it doesn&#x27;t know how to decode the new instruction. Let&#x27;s fix that.</p>
+<p>^code disassemble-constant (1 before, 1 after)</p>
+<p>This instruction has a different instruction format, so we write a new helper function to disassemble it.</p>
+<p>^code constant-instruction</p>
+<p>There&#x27;s more going on here. As with <code>OP_RETURN</code>, we print out the name of the opcode. Then we pull out the constant index from the subsequent byte in the chunk. We print that index, but that isn&#x27;t super useful to us human readers. So we also look up the actual constant value -- since constants <em>are</em> known at compile time after all -- and display the value itself too.</p>
+<p>This requires some way to print a clox Value. That function will live in the &quot;value&quot; module, so we include that.</p>
+<p>^code debug-include-value (1 before, 2 after)</p>
+<p>Over in that header, we declare:</p>
+<p>^code print-value-h (1 before, 2 after)</p>
+<p>And here&#x27;s an implementation:</p>
+<p>^code print-value</p>
+<p>Magnificent, right? As you can imagine, this is going to get more complex once we add dynamic typing to Lox and have values of different types.</p>
+<p>Back in <code>constantInstruction()</code>, the only remaining piece is the return value.</p>
+<p>^code return-after-operand (1 before, 1 after)</p>
+<p>Remember that <code>disassembleInstruction()</code> also returns a number to tell the caller the offset of the beginning of the <em>next</em> instruction. Where <code>OP_RETURN</code> was only a single byte, <code>OP_CONSTANT</code> is two -- one for the opcode and one for the operand.</p>
+<h2>Line Information</h2>
+<p>Chunks contain almost all of the information that the runtime needs from the user&#x27;s source code. It&#x27;s kind of crazy to think that we can reduce all of the different AST classes that we created in jlox down to an array of bytes and an array of constants. There&#x27;s only one piece of data we&#x27;re missing. We need it, even though the user hopes to never see it.</p>
+<p>When a runtime error occurs, we show the user the line number of the offending source code. In jlox, those numbers live in tokens, which we in turn store in the AST nodes. We need a different solution for clox now that we&#x27;ve ditched syntax trees in favor of bytecode. Given any bytecode instruction, we need to be able to determine the line of the user&#x27;s source program that it was compiled from.</p>
+<p>There are a lot of clever ways we could encode this. I took the absolute &lt;span name=&quot;side&quot;&gt;simplest&lt;/span&gt; approach I could come up with, even though it&#x27;s embarrassingly inefficient with memory. In the chunk, we store a separate array of integers that parallels the bytecode. Each number in the array is the line number for the corresponding byte in the bytecode. When a runtime error occurs, we look up the line number at the same index as the current instruction&#x27;s offset in the code array.</p>
+<p>&lt;aside name=&quot;side&quot;&gt;</p>
+<p>This braindead encoding does do one thing right: it keeps the line information in a <em>separate</em> array instead of interleaving it in the bytecode itself. Since line information is only used when a runtime error occurs, we don&#x27;t want it between the instructions, taking up precious space in the CPU cache and causing more cache misses as the interpreter skips past it to get to the opcodes and operands it cares about.</p>
+<p>&lt;/aside&gt;</p>
+<p>To implement this, we add another array to Chunk.</p>
+<p>^code chunk-lines (1 before, 1 after)</p>
+<p>Since it exactly parallels the bytecode array, we don&#x27;t need a separate count or capacity. Every time we touch the code array, we make a corresponding change to the line number array, starting with initialization.</p>
+<p>^code chunk-null-lines (1 before, 1 after)</p>
+<p>And likewise deallocation:</p>
+<p>^code chunk-free-lines (1 before, 1 after)</p>
+<p>When we write a byte of code to the chunk, we need to know what source line it came from, so we add an extra parameter in the declaration of <code>writeChunk()</code>.</p>
+<p>^code write-chunk-with-line-h (1 before, 1 after)</p>
+<p>And in the implementation:</p>
+<p>^code write-chunk-with-line (1 after)</p>
+<p>When we allocate or grow the code array, we do the same for the line info too.</p>
+<p>^code write-chunk-line (2 before, 1 after)</p>
+<p>Finally, we store the line number in the array.</p>
+<p>^code chunk-write-line (1 before, 1 after)</p>
+<h3>Disassembling line information</h3>
+<p>Alright, let&#x27;s try this out with our little, uh, artisanal chunk. First, since we added a new parameter to <code>writeChunk()</code>, we need to fix those calls to pass in some -- arbitrary at this point -- line number.</p>
+<p>^code main-chunk-line (1 before, 2 after)</p>
+<p>Once we have a real front end, of course, the compiler will track the current line as it parses and pass that in.</p>
+<p>Now that we have line information for every instruction, let&#x27;s put it to good use. In our disassembler, it&#x27;s helpful to show which source line each instruction was compiled from. That gives us a way to map back to the original code when we&#x27;re trying to figure out what some blob of bytecode is supposed to do. After printing the offset of the instruction -- the number of bytes from the beginning of the chunk -- we show its source line.</p>
+<p>^code show-location (2 before, 2 after)</p>
+<p>Bytecode instructions tend to be pretty fine-grained. A single line of source code often compiles to a whole sequence of instructions. To make that more visually clear, we show a <code>|</code> for any instruction that comes from the same source line as the preceding one. The resulting output for our handwritten chunk looks like:</p>
+<pre class="text"><code>== test chunk ==
+0000  123 OP_CONSTANT         0 &#x27;1.2&#x27;
+0002    | OP_RETURN</code></pre>
+<p>We have a three-byte chunk. The first two bytes are a constant instruction that loads 1.2 from the chunk&#x27;s constant pool. The first byte is the <code>OP_CONSTANT</code> opcode and the second is the index in the constant pool. The third byte (at offset 2) is a single-byte return instruction.</p>
+<p>In the remaining chapters, we will flesh this out with lots more kinds of instructions. But the basic structure is here, and we have everything we need now to completely represent an executable piece of code at runtime in our virtual machine. Remember that whole family of AST classes we defined in jlox? In clox, we&#x27;ve reduced that down to three arrays: bytes of code, constant values, and line information for debugging.</p>
+<p>This reduction is a key reason why our new interpreter will be faster than jlox. You can think of bytecode as a sort of compact serialization of the AST, highly optimized for how the interpreter will deserialize it in the order it needs as it executes. In the [next chapter][vm</p>
+<p>], we will see how the virtual machine does exactly that.</p>
+<p>&lt;div class=&quot;challenges&quot;&gt;</p>
+<h2>Challenges</h2>
+<p>1.  Our encoding of line information is hilariously wasteful of memory. Given     that a series of instructions often correspond to the same source line, a     natural solution is something akin to [run-length encoding][rle</p>
+<p>] of the line     numbers.</p>
+<p>    Devise an encoding that compresses the line information for a     series of instructions on the same line. Change <code>writeChunk()</code> to write this     compressed form, and implement a <code>getLine()</code> function that, given the index     of an instruction, determines the line where the instruction occurs.</p>
+<p>    <em>Hint: It&#x27;s not necessary for <code>getLine()</code> to be particularly efficient.     Since it is called only when a runtime error occurs, it is well off the     critical path where performance matters.</em></p>
+<p>2.  Because <code>OP_CONSTANT</code> uses only a single byte for its operand, a chunk may     only contain up to 256 different constants. That&#x27;s small enough that people     writing real-world code will hit that limit. We could use two or more bytes     to store the operand, but that makes <em>every</em> constant instruction take up     more space. Most chunks won&#x27;t need that many unique constants, so that     wastes space and sacrifices some locality in the common case to support the     rare case.</p>
+<p>    To balance those two competing aims, many instruction sets feature multiple     instructions that perform the same operation but with operands of different     sizes. Leave our existing one-byte <code>OP_CONSTANT</code> instruction alone, and     define a second <code>OP_CONSTANT_LONG</code> instruction. It stores the operand as a     24-bit number, which should be plenty.</p>
+<p>    Implement this function:</p>
+<p>    <code></code>`c     void writeConstant(Chunk* chunk, Value value, int line) {       // Implement me...     }     <code></code>`</p>
+<p>    It adds <code>value</code> to <code>chunk</code>&#x27;s constant array and then writes an appropriate     instruction to load the constant. Also add support to the disassembler for     <code>OP_CONSTANT_LONG</code> instructions.</p>
+<p>    Defining two instructions seems to be the best of both worlds. What     sacrifices, if any, does it force on us?</p>
+<p>3.  Our <code>reallocate()</code> function relies on the C standard library for dynamic     memory allocation and freeing. <code>malloc()</code> and <code>free()</code> aren&#x27;t magic. Find     a couple of open source implementations of them and explain how they work.     How do they keep track of which bytes are allocated and which are free?     What is required to allocate a block of memory? Free it? How do they make     that efficient? What do they do about fragmentation?</p>
+<p>    <em>Hardcore mode:</em> Implement <code>reallocate()</code> without calling <code>realloc()</code>,     <code>malloc()</code>, or <code>free()</code>. You are allowed to call <code>malloc()</code> <em>once</em>, at the     beginning of the interpreter&#x27;s execution, to allocate a single big block of     memory, which your <code>reallocate()</code> function has access to. It parcels out     blobs of memory from that single region, your own personal heap. It&#x27;s your     job to define how it does that.</p>
+<p>&lt;/div&gt;</p>
+<p>[rle]: https://en.wikipedia.org/wiki/Run-length_encoding</p>
+<p>&lt;div class=&quot;design-note&quot;&gt;</p>
+<h2>Design Note: Test Your Language</h2>
+<p>We&#x27;re almost halfway through the book and one thing we haven&#x27;t talked about is <em>testing</em> your language implementation. That&#x27;s not because testing isn&#x27;t important. I can&#x27;t possibly stress enough how vital it is to have a good, comprehensive test suite for your language.</p>
+<p>I wrote a [test suite for Lox][tests</p>
+<p>] (which you are welcome to use on your own Lox implementation) before I wrote a single word of this book. Those tests found countless bugs in my implementations.</p>
+<p>[tests]: https://github.com/munificent/craftinginterpreters/tree/master/test</p>
+<p>Tests are important in all software, but they&#x27;re even more important for a programming language for at least a couple of reasons:</p>
+<ul>
+<li>  <strong>Users expect their programming languages to be rock solid.</strong> We are so</li>
+</ul>
+<p>    used to mature, stable compilers and interpreters that &quot;It&#x27;s your code, not     the compiler&quot; is [an ingrained part of software culture][fault</p>
+<p>]. If there     are bugs in your language implementation, users will go through the full     five stages of grief before they can figure out what&#x27;s going on, and you     don&#x27;t want to put them through all that.</p>
+<ul>
+<li>  <strong>A language implementation is a deeply interconnected piece of software.</strong></li>
+</ul>
+<p>    Some codebases are broad and shallow. If the file loading code is broken in     your text editor, it -- hopefully! -- won&#x27;t cause failures in the text     rendering on screen. Language implementations are narrower and deeper,     especially the core of the interpreter that handles the language&#x27;s actual     semantics. That makes it easy for subtle bugs to creep in caused by weird     interactions between various parts of the system. It takes good tests to     flush those out.</p>
+<ul>
+<li>  <strong>The input to a language implementation is, by design, combinatorial.</strong></li>
+</ul>
+<p>    There are an infinite number of possible programs a user could write, and     your implementation needs to run them all correctly. You obviously can&#x27;t     test that exhaustively, but you need to work hard to cover as much of the     input space as you can.</p>
+<ul>
+<li>  **Language implementations are often complex, constantly changing, and full</li>
+</ul>
+<p>    of optimizations.** That leads to gnarly code with lots of dark corners     where bugs can hide.</p>
+<p>[fault]: https://blog.codinghorror.com/the-first-rule-of-programming-its-always-your-fault/</p>
+<p>All of that means you&#x27;re gonna want a lot of tests. But <em>what</em> tests? Projects I&#x27;ve seen focus mostly on end-to-end &quot;language tests&quot;. Each test is a program written in the language along with the output or errors it is expected to produce. Then you have a test runner that pushes the test program through your language implementation and validates that it does what it&#x27;s supposed to. Writing your tests in the language itself has a few nice advantages:</p>
+<ul>
+<li>  The tests aren&#x27;t coupled to any particular API or internal architecture</li>
+</ul>
+<p>    decisions of the implementation. This frees you to reorganize or rewrite     parts of your interpreter or compiler without needing to update a slew of     tests.</p>
+<ul>
+<li>  You can use the same tests for multiple implementations of the language.</li>
+</ul>
+<ul>
+<li>  Tests can often be terse and easy to read and maintain since they are</li>
+</ul>
+<p>    simply scripts in your language.</p>
+<p>It&#x27;s not all rosy, though:</p>
+<ul>
+<li>  End-to-end tests help you determine <em>if</em> there is a bug, but not <em>where</em> the</li>
+</ul>
+<p>    bug is. It can be harder to figure out where the erroneous code in the     implementation is because all the test tells you is that the right output     didn&#x27;t appear.</p>
+<ul>
+<li>  It can be a chore to craft a valid program that tickles some obscure corner</li>
+</ul>
+<p>    of the implementation. This is particularly true for highly optimized     compilers where you may need to write convoluted code to ensure that you     end up on just the right optimization path where a bug may be hiding.</p>
+<ul>
+<li>  The overhead can be high to fire up the interpreter, parse, compile, and</li>
+</ul>
+<p>    run each test script. With a big suite of tests -- which you <em>do</em> want,     remember -- that can mean a lot of time spent waiting for the tests to     finish running.</p>
+<p>I could go on, but I don&#x27;t want this to turn into a sermon. Also, I don&#x27;t pretend to be an expert on <em>how</em> to test languages. I just want you to internalize how important it is <em>that</em> you test yours. Seriously. Test your language. You&#x27;ll thank me for it.</p>
+<p>&lt;/div&gt; </p>

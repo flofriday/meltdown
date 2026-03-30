@@ -1,0 +1,306 @@
+<blockquote> Take big bites. Anything worth doing is worth overdoing.</blockquote><blockquote></blockquote><blockquote> &lt;cite&gt;Robert A. Heinlein, &lt;em&gt;Time Enough for Love&lt;/em&gt;&lt;/cite&gt;</blockquote><p>The first step in any compiler or interpreter is &lt;span name=&quot;lexing&quot;&gt;scanning&lt;/span&gt;. The scanner takes in raw source code as a series of characters and groups it into a series of chunks we call <strong>tokens</strong>. These are the meaningful &quot;words&quot; and &quot;punctuation&quot; that make up the language&#x27;s grammar.</p>
+<p>&lt;aside name=&quot;lexing&quot;&gt;</p>
+<p>This task has been variously called &quot;scanning&quot; and &quot;lexing&quot; (short for &quot;lexical analysis&quot;) over the years. Way back when computers were as big as Winnebagos but had less memory than your watch, some people used &quot;scanner&quot; only to refer to the piece of code that dealt with reading raw source code characters from disk and buffering them in memory. Then &quot;lexing&quot; was the subsequent phase that did useful stuff with the characters.</p>
+<p>These days, reading a source file into memory is trivial, so it&#x27;s rarely a distinct phase in the compiler. Because of that, the two terms are basically interchangeable.</p>
+<p>&lt;/aside&gt;</p>
+<p>Scanning is a good starting point for us too because the code isn&#x27;t very hard -- pretty much a <code>switch</code> statement with delusions of grandeur. It will help us warm up before we tackle some of the more interesting material later. By the end of this chapter, we&#x27;ll have a full-featured, fast scanner that can take any string of Lox source code and produce the tokens that we&#x27;ll feed into the parser in the next chapter.</p>
+<h2>The Interpreter Framework</h2>
+<p>Since this is our first real chapter, before we get to actually scanning some code we need to sketch out the basic shape of our interpreter, jlox. Everything starts with a class in Java.</p>
+<p>^code lox-class</p>
+<p>&lt;aside name=&quot;64&quot;&gt;</p>
+<p>For exit codes, I&#x27;m using the conventions defined in the UNIX [&quot;sysexits.h&quot;][sysexits</p>
+<p>] header. It&#x27;s the closest thing to a standard I could find.</p>
+<p>[sysexits]: https://www.freebsd.org/cgi/man.cgi?query=sysexits&amp;amp;apropos=0&amp;amp;sektion=0&amp;amp;manpath=FreeBSD+4.3-RELEASE&amp;amp;format=html</p>
+<p>&lt;/aside&gt;</p>
+<p>Stick that in a text file, and go get your IDE or Makefile or whatever set up. I&#x27;ll be right here when you&#x27;re ready. Good? OK!</p>
+<p>Lox is a scripting language, which means it executes directly from source. Our interpreter supports two ways of running code. If you start jlox from the command line and give it a path to a file, it reads the file and executes it.</p>
+<p>^code run-file</p>
+<p>If you want a more intimate conversation with your interpreter, you can also run it interactively. Fire up jlox without any arguments, and it drops you into a prompt where you can enter and execute code one line at a time.</p>
+<p>&lt;aside name=&quot;repl&quot;&gt;</p>
+<p>An interactive prompt is also called a &quot;REPL&quot; (pronounced like &quot;rebel&quot; but with a &quot;p&quot;). The name comes from Lisp where implementing one is as simple as wrapping a loop around a few built-in functions:</p>
+<pre class="lisp"><code>(print (eval (read)))</code></pre>
+<p>Working outwards from the most nested call, you <strong>R</strong>ead a line of input, <strong>E</strong>valuate it, <strong>P</strong>rint the result, then <strong>L</strong>oop and do it all over again.</p>
+<p>&lt;/aside&gt;</p>
+<p>^code prompt</p>
+<p>The <code>readLine()</code> function, as the name so helpfully implies, reads a line of input from the user on the command line and returns the result. To kill an interactive command-line app, you usually type Control-D. Doing so signals an &quot;end-of-file&quot; condition to the program. When that happens <code>readLine()</code> returns <code>null</code>, so we check for that to exit the loop.</p>
+<p>Both the prompt and the file runner are thin wrappers around this core function:</p>
+<p>^code run</p>
+<p>It&#x27;s not super useful yet since we haven&#x27;t written the interpreter, but baby steps, you know? Right now, it prints out the tokens our forthcoming scanner will emit so that we can see if we&#x27;re making progress.</p>
+<h3>Error handling</h3>
+<p>While we&#x27;re setting things up, another key piece of infrastructure is <em>error handling</em>. Textbooks sometimes gloss over this because it&#x27;s more a practical matter than a formal computer science-y problem. But if you care about making a language that&#x27;s actually <em>usable</em>, then handling errors gracefully is vital.</p>
+<p>The tools our language provides for dealing with errors make up a large portion of its user interface. When the user&#x27;s code is working, they aren&#x27;t thinking about our language at all -- their headspace is all about <em>their program</em>. It&#x27;s usually only when things go wrong that they notice our implementation.</p>
+<p>&lt;span name=&quot;errors&quot;&gt;When&lt;/span&gt; that happens, it&#x27;s up to us to give the user all the information they need to understand what went wrong and guide them gently back to where they are trying to go. Doing that well means thinking about error handling all through the implementation of our interpreter, starting now.</p>
+<p>&lt;aside name=&quot;errors&quot;&gt;</p>
+<p>Having said all that, for <em>this</em> interpreter, what we&#x27;ll build is pretty bare bones. I&#x27;d love to talk about interactive debuggers, static analyzers, and other fun stuff, but there&#x27;s only so much ink in the pen.</p>
+<p>&lt;/aside&gt;</p>
+<p>^code lox-error</p>
+<p>This <code>error()</code> function and its <code>report()</code> helper tells the user some syntax error occurred on a given line. That is really the bare minimum to be able to claim you even <em>have</em> error reporting. Imagine if you accidentally left a dangling comma in some function call and the interpreter printed out:</p>
+<pre class="text"><code>Error: Unexpected &quot;,&quot; somewhere in your code. Good luck finding it!</code></pre>
+<p>That&#x27;s not very helpful. We need to at least point them to the right line. Even better would be the beginning and end column so they know <em>where</em> in the line. Even better than <em>that</em> is to <em>show</em> the user the offending line, like:</p>
+<pre class="text"><code>Error: Unexpected &quot;,&quot; in argument list.
+
+    15 | function(first, second,);
+                               ^-- Here.</code></pre>
+<p>I&#x27;d love to implement something like that in this book but the honest truth is that it&#x27;s a lot of grungy string manipulation code. Very useful for users, but not super fun to read in a book and not very technically interesting. So we&#x27;ll stick with just a line number. In your own interpreters, please do as I say and not as I do.</p>
+<p>The primary reason we&#x27;re sticking this error reporting function in the main Lox class is because of that <code>hadError</code> field. It&#x27;s defined here:</p>
+<p>^code had-error (1 before)</p>
+<p>We&#x27;ll use this to ensure we don&#x27;t try to execute code that has a known error. Also, it lets us exit with a non-zero exit code like a good command line citizen should.</p>
+<p>^code exit-code (1 before, 1 after)</p>
+<p>We need to reset this flag in the interactive loop. If the user makes a mistake, it shouldn&#x27;t kill their entire session.</p>
+<p>^code reset-had-error (1 before, 1 after)</p>
+<p>The other reason I pulled the error reporting out here instead of stuffing it into the scanner and other phases where the error might occur is to remind you that it&#x27;s good engineering practice to separate the code that <em>generates</em> the errors from the code that <em>reports</em> them.</p>
+<p>Various phases of the front end will detect errors, but it&#x27;s not really their job to know how to present that to a user. In a full-featured language implementation, you will likely have multiple ways errors get displayed: on stderr, in an IDE&#x27;s error window, logged to a file, etc. You don&#x27;t want that code smeared all over your scanner and parser.</p>
+<p>Ideally, we would have an actual abstraction, some kind of &lt;span name=&quot;reporter&quot;&gt;&quot;ErrorReporter&quot;&lt;/span&gt; interface that gets passed to the scanner and parser so that we can swap out different reporting strategies. For our simple interpreter here, I didn&#x27;t do that, but I did at least move the code for error reporting into a different class.</p>
+<p>&lt;aside name=&quot;reporter&quot;&gt;</p>
+<p>I had exactly that when I first implemented jlox. I ended up tearing it out because it felt over-engineered for the minimal interpreter in this book.</p>
+<p>&lt;/aside&gt;</p>
+<p>With some rudimentary error handling in place, our application shell is ready. Once we have a Scanner class with a <code>scanTokens()</code> method, we can start running it. Before we get to that, let&#x27;s get more precise about what tokens are.</p>
+<h2>Lexemes and Tokens</h2>
+<p>Here&#x27;s a line of Lox code:</p>
+<pre class="lox"><code>var language = &quot;lox&quot;;</code></pre>
+<p>Here, <code>var</code> is the keyword for declaring a variable. That three-character sequence &quot;v-a-r&quot; means something. But if we yank three letters out of the middle of <code>language</code>, like &quot;g-u-a&quot;, those don&#x27;t mean anything on their own.</p>
+<p>That&#x27;s what lexical analysis is about. Our job is to scan through the list of characters and group them together into the smallest sequences that still represent something. Each of these blobs of characters is called a <strong>lexeme</strong>. In that example line of code, the lexemes are:</p>
+<p>&lt;img src=&quot;image/scanning/lexemes.png&quot; alt=&quot;&#x27;var&#x27;, &#x27;language&#x27;, &#x27;=&#x27;, &#x27;lox&#x27;, &#x27;;&#x27;&quot; /&gt;</p>
+<p>The lexemes are only the raw substrings of the source code. However, in the process of grouping character sequences into lexemes, we also stumble upon some other useful information. When we take the lexeme and bundle it together with that other data, the result is a token. It includes useful stuff like:</p>
+<h3>Token type</h3>
+<p>Keywords are part of the shape of the language&#x27;s grammar, so the parser often has code like, &quot;If the next token is <code>while</code> then do...&quot; That means the parser wants to know not just that it has a lexeme for some identifier, but that it has a <em>reserved</em> word, and <em>which</em> keyword it is.</p>
+<p>The &lt;span name=&quot;ugly&quot;&gt;parser&lt;/span&gt; could categorize tokens from the raw lexeme by comparing the strings, but that&#x27;s slow and kind of ugly. Instead, at the point that we recognize a lexeme, we also remember which <em>kind</em> of lexeme it represents. We have a different type for each keyword, operator, bit of punctuation, and literal type.</p>
+<p>&lt;aside name=&quot;ugly&quot;&gt;</p>
+<p>After all, string comparison ends up looking at individual characters, and isn&#x27;t that the scanner&#x27;s job?</p>
+<p>&lt;/aside&gt;</p>
+<p>^code token-type</p>
+<h3>Literal value</h3>
+<p>There are lexemes for literal values -- numbers and strings and the like. Since the scanner has to walk each character in the literal to correctly identify it, it can also convert that textual representation of a value to the living runtime object that will be used by the interpreter later.</p>
+<h3>Location information</h3>
+<p>Back when I was preaching the gospel about error handling, we saw that we need to tell users <em>where</em> errors occurred. Tracking that starts here. In our simple interpreter, we note only which line the token appears on, but more sophisticated implementations include the column and length too.</p>
+<p>&lt;aside name=&quot;location&quot;&gt;</p>
+<p>Some token implementations store the location as two numbers: the offset from the beginning of the source file to the beginning of the lexeme, and the length of the lexeme. The scanner needs to know these anyway, so there&#x27;s no overhead to calculate them.</p>
+<p>An offset can be converted to line and column positions later by looking back at the source file and counting the preceding newlines. That sounds slow, and it is. However, you need to do it <em>only when you need to actually display a line and column to the user</em>. Most tokens never appear in an error message. For those, the less time you spend calculating position information ahead of time, the better.</p>
+<p>&lt;/aside&gt;</p>
+<p>We take all of this data and wrap it in a class.</p>
+<p>^code token-class</p>
+<p>Now we have an object with enough structure to be useful for all of the later phases of the interpreter.</p>
+<h2>Regular Languages and Expressions</h2>
+<p>Now that we know what we&#x27;re trying to produce, let&#x27;s, well, produce it. The core of the scanner is a loop. Starting at the first character of the source code, the scanner figures out what lexeme the character belongs to, and consumes it and any following characters that are part of that lexeme. When it reaches the end of that lexeme, it emits a token.</p>
+<p>Then it loops back and does it again, starting from the very next character in the source code. It keeps doing that, eating characters and occasionally, uh, excreting tokens, until it reaches the end of the input.</p>
+<p>&lt;span name=&quot;alligator&quot;&gt;&lt;/span&gt;</p>
+<p>&lt;img src=&quot;image/scanning/lexigator.png&quot; alt=&quot;An alligator eating characters and, well, you don&#x27;t want to know.&quot; /&gt;</p>
+<p>&lt;aside name=&quot;alligator&quot;&gt;</p>
+<p>Lexical analygator.</p>
+<p>&lt;/aside&gt;</p>
+<p>The part of the loop where we look at a handful of characters to figure out which kind of lexeme it &quot;matches&quot; may sound familiar. If you know regular expressions, you might consider defining a regex for each kind of lexeme and using those to match characters. For example, Lox has the same rules as C for identifiers (variable names and the like). This regex matches one:</p>
+<pre class="text"><code>[a-zA-Z_][a-zA-Z_0-9]*</code></pre>
+<p>If you did think of regular expressions, your intuition is a deep one. The rules that determine how a particular language groups characters into lexemes are called its &lt;span name=&quot;theory&quot;&gt;<strong>lexical grammar</strong>&lt;/span&gt;. In Lox, as in most programming languages, the rules of that grammar are simple enough for the language to be classified a **[regular language][</p>
+<p>]**. That&#x27;s the same &quot;regular&quot; as in regular expressions.</p>
+<p>[regular language]: https://en.wikipedia.org/wiki/Regular_language</p>
+<p>&lt;aside name=&quot;theory&quot;&gt;</p>
+<p>It pains me to gloss over the theory so much, especially when it&#x27;s as interesting as I think the [Chomsky hierarchy][</p>
+<p>] and [finite-state machines][</p>
+<p>] are. But the honest truth is other books cover this better than I could. [<em>Compilers: Principles, Techniques, and Tools</em>][dragon</p>
+<p>] (universally known as &quot;the dragon book&quot;) is the canonical reference.</p>
+<p>[chomsky hierarchy]: https://en.wikipedia.org/wiki/Chomsky_hierarchy [dragon</p>
+<p>]: https://en.wikipedia.org/wiki/Compilers:_Principles,_Techniques,_and_Tools [finite-state machines]: https://en.wikipedia.org/wiki/Finite-state_machine</p>
+<p>&lt;/aside&gt;</p>
+<p>You very precisely <em>can</em> recognize all of the different lexemes for Lox using regexes if you want to, and there&#x27;s a pile of interesting theory underlying why that is and what it means. Tools like [Lex][</p>
+<p>] or [Flex][</p>
+<p>] are designed expressly to let you do this -- throw a handful of regexes at them, and they give you a complete scanner &lt;span name=&quot;lex&quot;&gt;back&lt;/span&gt;.</p>
+<p>&lt;aside name=&quot;lex&quot;&gt;</p>
+<p>Lex was created by Mike Lesk and Eric Schmidt. Yes, the same Eric Schmidt who was executive chairman of Google. I&#x27;m not saying programming languages are a surefire path to wealth and fame, but we <em>can</em> count at least one mega billionaire among us.</p>
+<p>&lt;/aside&gt;</p>
+<p>[lex]: http://dinosaur.compilertools.net/lex/ [flex</p>
+<p>]: https://github.com/westes/flex</p>
+<p>Since our goal is to understand how a scanner does what it does, we won&#x27;t be delegating that task. We&#x27;re about handcrafted goods.</p>
+<h2>The Scanner Class</h2>
+<p>Without further ado, let&#x27;s make ourselves a scanner.</p>
+<p>^code scanner-class</p>
+<p>&lt;aside name=&quot;static-import&quot;&gt;</p>
+<p>I know static imports are considered bad style by some, but they save me from having to sprinkle <code>TokenType.</code> all over the scanner and parser. Forgive me, but every character counts in a book.</p>
+<p>&lt;/aside&gt;</p>
+<p>We store the raw source code as a simple string, and we have a list ready to fill with tokens we&#x27;re going to generate. The aforementioned loop that does that looks like this:</p>
+<p>^code scan-tokens</p>
+<p>The scanner works its way through the source code, adding tokens until it runs out of characters. Then it appends one final &quot;end of file&quot; token. That isn&#x27;t strictly needed, but it makes our parser a little cleaner.</p>
+<p>This loop depends on a couple of fields to keep track of where the scanner is in the source code.</p>
+<p>^code scan-state (1 before, 2 after)</p>
+<p>The <code>start</code> and <code>current</code> fields are offsets that index into the string. The <code>start</code> field points to the first character in the lexeme being scanned, and <code>current</code> points at the character currently being considered. The <code>line</code> field tracks what source line <code>current</code> is on so we can produce tokens that know their location.</p>
+<p>Then we have one little helper function that tells us if we&#x27;ve consumed all the characters.</p>
+<p>^code is-at-end</p>
+<h2>Recognizing Lexemes</h2>
+<p>In each turn of the loop, we scan a single token. This is the real heart of the scanner. We&#x27;ll start simple. Imagine if every lexeme were only a single character long. All you would need to do is consume the next character and pick a token type for it. Several lexemes <em>are</em> only a single character in Lox, so let&#x27;s start with those.</p>
+<p>^code scan-token</p>
+<p>&lt;aside name=&quot;slash&quot;&gt;</p>
+<p>Wondering why <code>/</code> isn&#x27;t in here? Don&#x27;t worry, we&#x27;ll get to it.</p>
+<p>&lt;/aside&gt;</p>
+<p>Again, we need a couple of helper methods.</p>
+<p>^code advance-and-add-token</p>
+<p>The <code>advance()</code> method consumes the next character in the source file and returns it. Where <code>advance()</code> is for input, <code>addToken()</code> is for output. It grabs the text of the current lexeme and creates a new token for it. We&#x27;ll use the other overload to handle tokens with literal values soon.</p>
+<h3>Lexical errors</h3>
+<p>Before we get too far in, let&#x27;s take a moment to think about errors at the lexical level. What happens if a user throws a source file containing some characters Lox doesn&#x27;t use, like <code>@#^</code>, at our interpreter? Right now, those characters get silently discarded. They aren&#x27;t used by the Lox language, but that doesn&#x27;t mean the interpreter can pretend they aren&#x27;t there. Instead, we report an error.</p>
+<p>^code char-error (1 before, 1 after)</p>
+<p>Note that the erroneous character is still <em>consumed</em> by the earlier call to <code>advance()</code>. That&#x27;s important so that we don&#x27;t get stuck in an infinite loop.</p>
+<p>Note also that we &lt;span name=&quot;shotgun&quot;&gt;<em>keep scanning</em>&lt;/span&gt;. There may be other errors later in the program. It gives our users a better experience if we detect as many of those as possible in one go. Otherwise, they see one tiny error and fix it, only to have the next error appear, and so on. Syntax error Whac-A-Mole is no fun.</p>
+<p>(Don&#x27;t worry. Since <code>hadError</code> gets set, we&#x27;ll never try to <em>execute</em> any of the code, even though we keep going and scan the rest of it.)</p>
+<p>&lt;aside name=&quot;shotgun&quot;&gt;</p>
+<p>The code reports each invalid character separately, so this shotguns the user with a blast of errors if they accidentally paste a big blob of weird text. Coalescing a run of invalid characters into a single error would give a nicer user experience.</p>
+<p>&lt;/aside&gt;</p>
+<h3>Operators</h3>
+<p>We have single-character lexemes working, but that doesn&#x27;t cover all of Lox&#x27;s operators. What about <code>!</code>? It&#x27;s a single character, right? Sometimes, yes, but if the very next character is an equals sign, then we should instead create a <code>!=</code> lexeme. Note that the <code>!</code> and <code>=</code> are <em>not</em> two independent operators. You can&#x27;t write <code>!   =</code> in Lox and have it behave like an inequality operator. That&#x27;s why we need to scan <code>!=</code> as a single lexeme. Likewise, <code>&lt;</code>, <code>&gt;</code>, and <code>=</code> can all be followed by <code>=</code> to create the other equality and comparison operators.</p>
+<p>For all of these, we need to look at the second character.</p>
+<p>^code two-char-tokens (1 before, 2 after)</p>
+<p>Those cases use this new method:</p>
+<p>^code match</p>
+<p>It&#x27;s like a conditional <code>advance()</code>. We only consume the current character if it&#x27;s what we&#x27;re looking for.</p>
+<p>Using <code>match()</code>, we recognize these lexemes in two stages. When we reach, for example, <code>!</code>, we jump to its switch case. That means we know the lexeme <em>starts</em> with <code>!</code>. Then we look at the next character to determine if we&#x27;re on a <code>!=</code> or merely a <code>!</code>.</p>
+<h2>Longer Lexemes</h2>
+<p>We&#x27;re still missing one operator: <code>/</code> for division. That character needs a little special handling because comments begin with a slash too.</p>
+<p>^code slash (1 before, 2 after)</p>
+<p>This is similar to the other two-character operators, except that when we find a second <code>/</code>, we don&#x27;t end the token yet. Instead, we keep consuming characters until we reach the end of the line.</p>
+<p>This is our general strategy for handling longer lexemes. After we detect the beginning of one, we shunt over to some lexeme-specific code that keeps eating characters until it sees the end.</p>
+<p>We&#x27;ve got another helper:</p>
+<p>^code peek</p>
+<p>It&#x27;s sort of like <code>advance()</code>, but doesn&#x27;t consume the character. This is called &lt;span name=&quot;match&quot;&gt;<strong>lookahead</strong>&lt;/span&gt;. Since it only looks at the current unconsumed character, we have <em>one character of lookahead</em>. The smaller this number is, generally, the faster the scanner runs. The rules of the lexical grammar dictate how much lookahead we need. Fortunately, most languages in wide use peek only one or two characters ahead.</p>
+<p>&lt;aside name=&quot;match&quot;&gt;</p>
+<p>Technically, <code>match()</code> is doing lookahead too. <code>advance()</code> and <code>peek()</code> are the fundamental operators and <code>match()</code> combines them.</p>
+<p>&lt;/aside&gt;</p>
+<p>Comments are lexemes, but they aren&#x27;t meaningful, and the parser doesn&#x27;t want to deal with them. So when we reach the end of the comment, we <em>don&#x27;t</em> call <code>addToken()</code>. When we loop back around to start the next lexeme, <code>start</code> gets reset and the comment&#x27;s lexeme disappears in a puff of smoke.</p>
+<p>While we&#x27;re at it, now&#x27;s a good time to skip over those other meaningless characters: newlines and whitespace.</p>
+<p>^code whitespace (1 before, 3 after)</p>
+<p>When encountering whitespace, we simply go back to the beginning of the scan loop. That starts a new lexeme <em>after</em> the whitespace character. For newlines, we do the same thing, but we also increment the line counter. (This is why we used <code>peek()</code> to find the newline ending a comment instead of <code>match()</code>. We want that newline to get us here so we can update <code>line</code>.)</p>
+<p>Our scanner is getting smarter. It can handle fairly free-form code like:</p>
+<pre class="lox"><code>// this is a comment
+(( )){} // grouping stuff
+!*+-/=&lt;&gt; &lt;= == // operators</code></pre>
+<h3>String literals</h3>
+<p>Now that we&#x27;re comfortable with longer lexemes, we&#x27;re ready to tackle literals. We&#x27;ll do strings first, since they always begin with a specific character, <code>&quot;</code>.</p>
+<p>^code string-start (1 before, 2 after)</p>
+<p>That calls:</p>
+<p>^code string</p>
+<p>Like with comments, we consume characters until we hit the <code>&quot;</code> that ends the string. We also gracefully handle running out of input before the string is closed and report an error for that.</p>
+<p>For no particular reason, Lox supports multi-line strings. There are pros and cons to that, but prohibiting them was a little more complex than allowing them, so I left them in. That does mean we also need to update <code>line</code> when we hit a newline inside a string.</p>
+<p>Finally, the last interesting bit is that when we create the token, we also produce the actual string <em>value</em> that will be used later by the interpreter. Here, that conversion only requires a <code>substring()</code> to strip off the surrounding quotes. If Lox supported escape sequences like <code>\n</code>, we&#x27;d unescape those here.</p>
+<h3>Number literals</h3>
+<p>All numbers in Lox are floating point at runtime, but both integer and decimal literals are supported. A number literal is a series of &lt;span name=&quot;minus&quot;&gt;digits&lt;/span&gt; optionally followed by a <code>.</code> and one or more trailing digits.</p>
+<p>&lt;aside name=&quot;minus&quot;&gt;</p>
+<p>Since we look only for a digit to start a number, that means <code>-123</code> is not a number <em>literal</em>. Instead, <code>-123</code>, is an <em>expression</em> that applies <code>-</code> to the number literal <code>123</code>. In practice, the result is the same, though it has one interesting edge case if we were to add method calls on numbers. Consider:</p>
+<pre class="lox"><code>print -123.abs();</code></pre>
+<p>This prints <code>-123</code> because negation has lower precedence than method calls. We could fix that by making <code>-</code> part of the number literal. But then consider:</p>
+<pre class="lox"><code>var n = 123;
+print -n.abs();</code></pre>
+<p>This still produces <code>-123</code>, so now the language seems inconsistent. No matter what you do, some case ends up weird.</p>
+<p>&lt;/aside&gt;</p>
+<pre class="lox"><code>1234
+12.34</code></pre>
+<p>We don&#x27;t allow a leading or trailing decimal point, so these are both invalid:</p>
+<pre class="lox"><code>.1234
+1234.</code></pre>
+<p>We could easily support the former, but I left it out to keep things simple. The latter gets weird if we ever want to allow methods on numbers like <code>123.sqrt()</code>.</p>
+<p>To recognize the beginning of a number lexeme, we look for any digit. It&#x27;s kind of tedious to add cases for every decimal digit, so we&#x27;ll stuff it in the default case instead.</p>
+<p>^code digit-start (1 before, 1 after)</p>
+<p>This relies on this little utility:</p>
+<p>^code is-digit</p>
+<p>&lt;aside name=&quot;is-digit&quot;&gt;</p>
+<p>The Java standard library provides [<code>Character.isDigit()</code>][is-digit</p>
+<p>], which seems like a good fit. Alas, that method allows things like Devanagari digits, full-width numbers, and other funny stuff we don&#x27;t want.</p>
+<p>[is-digit]: http://docs.oracle.com/javase/7/docs/api/java/lang/Character.html#isDigit(char)</p>
+<p>&lt;/aside&gt;</p>
+<p>Once we know we are in a number, we branch to a separate method to consume the rest of the literal, like we do with strings.</p>
+<p>^code number</p>
+<p>We consume as many digits as we find for the integer part of the literal. Then we look for a fractional part, which is a decimal point (<code>.</code>) followed by at least one digit. If we do have a fractional part, again, we consume as many digits as we can find.</p>
+<p>Looking past the decimal point requires a second character of lookahead since we don&#x27;t want to consume the <code>.</code> until we&#x27;re sure there is a digit <em>after</em> it. So we add:</p>
+<p>^code peek-next</p>
+<p>&lt;aside name=&quot;peek-next&quot;&gt;</p>
+<p>I could have made <code>peek()</code> take a parameter for the number of characters ahead to look instead of defining two functions, but that would allow <em>arbitrarily</em> far lookahead. Providing these two functions makes it clearer to a reader of the code that our scanner looks ahead at most two characters.</p>
+<p>&lt;/aside&gt;</p>
+<p>Finally, we convert the lexeme to its numeric value. Our interpreter uses Java&#x27;s <code>Double</code> type to represent numbers, so we produce a value of that type. We&#x27;re using Java&#x27;s own parsing method to convert the lexeme to a real Java double. We could implement that ourselves, but, honestly, unless you&#x27;re trying to cram for an upcoming programming interview, it&#x27;s not worth your time.</p>
+<p>The remaining literals are Booleans and <code>nil</code>, but we handle those as keywords, which gets us to...</p>
+<h2>Reserved Words and Identifiers</h2>
+<p>Our scanner is almost done. The only remaining pieces of the lexical grammar to implement are identifiers and their close cousins, the reserved words. You might think we could match keywords like <code>or</code> in the same way we handle multiple-character operators like <code>&lt;=</code>.</p>
+<pre class="java"><code>case &#x27;o&#x27;:
+  if (match(&#x27;r&#x27;)) {
+    addToken(OR);
+  }
+  break;</code></pre>
+<p>Consider what would happen if a user named a variable <code>orchid</code>. The scanner would see the first two letters, <code>or</code>, and immediately emit an <code>or</code> keyword token. This gets us to an important principle called &lt;span name=&quot;maximal&quot;&gt;<strong>maximal munch</strong>&lt;/span&gt;. When two lexical grammar rules can both match a chunk of code that the scanner is looking at, <em>whichever one matches the most characters wins</em>.</p>
+<p>That rule states that if we can match <code>orchid</code> as an identifier and <code>or</code> as a keyword, then the former wins. This is also why we tacitly assumed, previously, that <code>&lt;=</code> should be scanned as a single <code>&lt;=</code> token and not <code>&lt;</code> followed by <code>=</code>.</p>
+<p>&lt;aside name=&quot;maximal&quot;&gt;</p>
+<p>Consider this nasty bit of C code:</p>
+<pre class="c"><code>---a;</code></pre>
+<p>Is it valid? That depends on how the scanner splits the lexemes. What if the scanner sees it like this:</p>
+<pre class="c"><code>- --a;</code></pre>
+<p>Then it could be parsed. But that would require the scanner to know about the grammatical structure of the surrounding code, which entangles things more than we want. Instead, the maximal munch rule says that it is <em>always</em> scanned like:</p>
+<pre class="c"><code>-- -a;</code></pre>
+<p>It scans it that way even though doing so leads to a syntax error later in the parser.</p>
+<p>&lt;/aside&gt;</p>
+<p>Maximal munch means we can&#x27;t easily detect a reserved word until we&#x27;ve reached the end of what might instead be an identifier. After all, a reserved word <em>is</em> an identifier, it&#x27;s just one that has been claimed by the language for its own use. That&#x27;s where the term <strong>reserved word</strong> comes from.</p>
+<p>So we begin by assuming any lexeme starting with a letter or underscore is an identifier.</p>
+<p>^code identifier-start (3 before, 3 after)</p>
+<p>The rest of the code lives over here:</p>
+<p>^code identifier</p>
+<p>We define that in terms of these helpers:</p>
+<p>^code is-alpha</p>
+<p>That gets identifiers working. To handle keywords, we see if the identifier&#x27;s lexeme is one of the reserved words. If so, we use a token type specific to that keyword. We define the set of reserved words in a map.</p>
+<p>^code keyword-map</p>
+<p>Then, after we scan an identifier, we check to see if it matches anything in the map.</p>
+<p>^code keyword-type (2 before, 1 after)</p>
+<p>If so, we use that keyword&#x27;s token type. Otherwise, it&#x27;s a regular user-defined identifier.</p>
+<p>And with that, we now have a complete scanner for the entire Lox lexical grammar. Fire up the REPL and type in some valid and invalid code. Does it produce the tokens you expect? Try to come up with some interesting edge cases and see if it handles them as it should.</p>
+<p>&lt;div class=&quot;challenges&quot;&gt;</p>
+<h2>Challenges</h2>
+<p>1.  The lexical grammars of Python and Haskell are not <em>regular</em>. What does that     mean, and why aren&#x27;t they?</p>
+<p>1.  Aside from separating tokens -- distinguishing <code>print foo</code> from <code>printfoo</code>     -- spaces aren&#x27;t used for much in most languages. However, in a couple of     dark corners, a space <em>does</em> affect how code is parsed in CoffeeScript,     Ruby, and the C preprocessor. Where and what effect does it have in each of     those languages?</p>
+<p>1.  Our scanner here, like most, discards comments and whitespace since those     aren&#x27;t needed by the parser. Why might you want to write a scanner that does     <em>not</em> discard those? What would it be useful for?</p>
+<p>1.  Add support to Lox&#x27;s scanner for C-style <code>/* ... */</code> block comments. Make     sure to handle newlines in them. Consider allowing them to nest. Is adding     support for nesting more work than you expected? Why?</p>
+<p>&lt;/div&gt;</p>
+<p>&lt;div class=&quot;design-note&quot;&gt;</p>
+<h2>Design Note: Implicit Semicolons</h2>
+<p>Programmers today are spoiled for choice in languages and have gotten picky about syntax. They want their language to look clean and modern. One bit of syntactic lichen that almost every new language scrapes off (and some ancient ones like BASIC never had) is <code>;</code> as an explicit statement terminator.</p>
+<p>Instead, they treat a newline as a statement terminator where it makes sense to do so. The &quot;where it makes sense&quot; part is the challenging bit. While <em>most</em> statements are on their own line, sometimes you need to spread a single statement across a couple of lines. Those intermingled newlines should not be treated as terminators.</p>
+<p>Most of the obvious cases where the newline should be ignored are easy to detect, but there are a handful of nasty ones:</p>
+<ul>
+<li>A return value on the next line:</li>
+</ul>
+<p>    <code></code>`js     if (condition) return     &quot;value&quot;     <code></code>`</p>
+<p>    Is &quot;value&quot; the value being returned, or do we have a <code>return</code> statement with     no value followed by an expression statement containing a string literal?</p>
+<ul>
+<li>A parenthesized expression on the next line:</li>
+</ul>
+<p>    <code></code>`js     func     (parenthesized)     <code></code>`</p>
+<p>    Is this a call to <code>func(parenthesized)</code>, or two expression statements, one     for <code>func</code> and one for a parenthesized expression?</p>
+<ul>
+<li>A <code>-</code> on the next line:</li>
+</ul>
+<p>    <code></code>`js     first     -second     <code></code>`</p>
+<p>    Is this <code>first - second</code> -- an infix subtraction -- or two expression     statements, one for <code>first</code> and one to negate <code>second</code>?</p>
+<p>In all of these, either treating the newline as a separator or not would both produce valid code, but possibly not the code the user wants. Across languages, there is an unsettling variety of rules used to decide which newlines are separators. Here are a couple:</p>
+<ul>
+<li>  [Lua][</li>
+</ul>
+<p>] completely ignores newlines, but carefully controls its grammar such     that no separator between statements is needed at all in most cases. This is     perfectly legit:</p>
+<p>    <code></code>`lua     a = 1 b = 2     <code></code>`</p>
+<p>    Lua avoids the <code>return</code> problem by requiring a <code>return</code> statement to be the     very last statement in a block. If there is a value after <code>return</code> before     the keyword <code>end</code>, it <em>must</em> be for the <code>return</code>. For the other two cases,     they allow an explicit <code>;</code> and expect users to use that. In practice, that     almost never happens because there&#x27;s no point in a parenthesized or unary     negation expression statement.</p>
+<ul>
+<li>  [Go][</li>
+</ul>
+<p>] handles newlines in the scanner. If a newline appears following one     of a handful of token types that are known to potentially end a statement,     the newline is treated like a semicolon. Otherwise it is ignored. The Go     team provides a canonical code formatter, [gofmt][</p>
+<p>], and the ecosystem is     fervent about its use, which ensures that idiomatic styled code works well     with this simple rule.</p>
+<ul>
+<li>  [Python][</li>
+</ul>
+<p>] treats all newlines as significant unless an explicit backslash     is used at the end of a line to continue it to the next line. However,     newlines anywhere inside a pair of brackets (<code>()</code>, <code>[]</code>, or <code>{}</code>) are     ignored. Idiomatic style strongly prefers the latter.</p>
+<p>    This rule works well for Python because it is a highly statement-oriented     language. In particular, Python&#x27;s grammar ensures a statement never appears     inside an expression. C does the same, but many other languages which have a     &quot;lambda&quot; or function literal syntax do not.</p>
+<p>    An example in JavaScript:</p>
+<p>    <code></code>`js     console.log(function() {       statement();     });     <code></code>`</p>
+<p>    Here, the <code>console.log()</code> <em>expression</em> contains a function literal which     in turn contains the <em>statement</em> <code>statement();</code>.</p>
+<p>    Python would need a different set of rules for implicitly joining lines if     you could get back <em>into</em> a &lt;span name=&quot;lambda&quot;&gt;statement&lt;/span&gt; where     newlines should become meaningful while still nested inside brackets.</p>
+<p>&lt;aside name=&quot;lambda&quot;&gt;</p>
+<p>And now you know why Python&#x27;s <code>lambda</code> allows only a single expression body.</p>
+<p>&lt;/aside&gt;</p>
+<ul>
+<li>  JavaScript&#x27;s &quot;[automatic semicolon insertion][asi</li>
+</ul>
+<p>]&quot; rule is the real odd     one. Where other languages assume most newlines <em>are</em> meaningful and only a     few should be ignored in multi-line statements, JS assumes the opposite. It     treats all of your newlines as meaningless whitespace <em>unless</em> it encounters     a parse error. If it does, it goes back and tries turning the previous     newline into a semicolon to get something grammatically valid.</p>
+<p>    This design note would turn into a design diatribe if I went into complete     detail about how that even <em>works</em>, much less all the various ways that     JavaScript&#x27;s &quot;solution&quot; is a bad idea. It&#x27;s a mess. JavaScript is the only     language I know where many style guides demand explicit semicolons after     every statement even though the language theoretically lets you elide them.</p>
+<p>If you&#x27;re designing a new language, you almost surely <em>should</em> avoid an explicit statement terminator. Programmers are creatures of fashion like other humans, and semicolons are as passé as ALL CAPS KEYWORDS. Just make sure you pick a set of rules that make sense for your language&#x27;s particular grammar and idioms. And don&#x27;t do what JavaScript did.</p>
+<p>&lt;/div&gt;</p>
+<p>[lua]: https://www.lua.org/pil/1.1.html [go</p>
+<p>]: https://golang.org/ref/spec#Semicolons [gofmt]: https://golang.org/cmd/gofmt/ [python</p>
+<p>]: https://docs.python.org/3.5/reference/lexical_analysis.html#implicit-line-joining [asi]: https://www.ecma-international.org/ecma-262/5.1/#sec-7.9 </p>

@@ -1,0 +1,269 @@
+<blockquote> Logic, like whiskey, loses its beneficial effect when taken in too large</blockquote><blockquote> quantities.</blockquote><blockquote></blockquote><blockquote> &lt;cite&gt;Edward John Moreton Drax Plunkett, Lord Dunsany&lt;/cite&gt;</blockquote><p>Compared to [last chapter&#x27;s][statements</p>
+<p>] grueling marathon, today is a lighthearted frolic through a daisy meadow. But while the work is easy, the reward is surprisingly large.</p>
+<p>[statements]: statements-and-state.html</p>
+<p>Right now, our interpreter is little more than a calculator. A Lox program can only do a fixed amount of work before completing. To make it run twice as long you have to make the source code twice as lengthy. We&#x27;re about to fix that. In this chapter, our interpreter takes a big step towards the programming language major leagues: <em>Turing-completeness</em>.</p>
+<h2>Turing Machines (Briefly)</h2>
+<p>In the early part of last century, mathematicians stumbled into a series of confusing &lt;span name=&quot;paradox&quot;&gt;paradoxes&lt;/span&gt; that led them to doubt the stability of the foundation they had built their work upon. To address that [crisis][</p>
+<p>], they went back to square one. Starting from a handful of axioms, logic, and set theory, they hoped to rebuild mathematics on top of an impervious foundation.</p>
+<p>[crisis]: https://en.wikipedia.org/wiki/Foundations_of_mathematics#Foundational_crisis</p>
+<p>&lt;aside name=&quot;paradox&quot;&gt;</p>
+<p>The most famous is [<strong>Russell&#x27;s paradox</strong>][russell</p>
+<p>]. Initially, set theory allowed you to define any sort of set. If you could describe it in English, it was valid. Naturally, given mathematicians&#x27; predilection for self-reference, sets can contain other sets. So Russell, rascal that he was, came up with:</p>
+<p><em>R is the set of all sets that do not contain themselves.</em></p>
+<p>Does R contain itself? If it doesn&#x27;t, then according to the second half of the definition it should. But if it does, then it no longer meets the definition. Cue mind exploding.</p>
+<p>[russell]: https://en.wikipedia.org/wiki/Russell%27s_paradox</p>
+<p>&lt;/aside&gt;</p>
+<p>They wanted to rigorously answer questions like, &quot;Can all true statements be proven?&quot;, &quot;Can we [compute][</p>
+<p>] all functions that we can define?&quot;, or even the more general question, &quot;What do we mean when we claim a function is &#x27;computable&#x27;?&quot;</p>
+<p>[compute]: https://en.wikipedia.org/wiki/Computable_function</p>
+<p>They presumed the answer to the first two questions would be &quot;yes&quot;. All that remained was to prove it. It turns out that the answer to both is &quot;no&quot;, and astonishingly, the two questions are deeply intertwined. This is a fascinating corner of mathematics that touches fundamental questions about what brains are able to do and how the universe works. I can&#x27;t do it justice here.</p>
+<p>What I do want to note is that in the process of proving that the answer to the first two questions is &quot;no&quot;, Alan Turing and Alonzo Church devised a precise answer to the last question -- a definition of what kinds of functions are &lt;span name=&quot;uncomputable&quot;&gt;computable&lt;/span&gt;. They each crafted a tiny system with a minimum set of machinery that is still powerful enough to compute any of a (very) large class of functions.</p>
+<p>&lt;aside name=&quot;uncomputable&quot;&gt;</p>
+<p>They proved the answer to the first question is &quot;no&quot; by showing that the function that returns the truth value of a given statement is <em>not</em> a computable one.</p>
+<p>&lt;/aside&gt;</p>
+<p>These are now considered the &quot;computable functions&quot;. Turing&#x27;s system is called a &lt;span name=&quot;turing&quot;&gt;<strong>Turing machine</strong>&lt;/span&gt;. Church&#x27;s is the <strong>lambda calculus</strong>. Both are still widely used as the basis for models of computation and, in fact, many modern functional programming languages use the lambda calculus at their core.</p>
+<p>&lt;aside name=&quot;turing&quot;&gt;</p>
+<p>Turing called his inventions &quot;a-machines&quot; for &quot;automatic&quot;. He wasn&#x27;t so self-aggrandizing as to put his <em>own</em> name on them. Later mathematicians did that for him. That&#x27;s how you get famous while still retaining some modesty.</p>
+<p>&lt;/aside&gt;</p>
+<p>&lt;img src=&quot;image/control-flow/turing-machine.png&quot; alt=&quot;A Turing machine.&quot; /&gt;</p>
+<p>Turing machines have better name recognition -- there&#x27;s no Hollywood film about Alonzo Church yet -- but the two formalisms are [equivalent in power][thesis</p>
+<p>]. In fact, any programming language with some minimal level of expressiveness is powerful enough to compute <em>any</em> computable function.</p>
+<p>[thesis]: https://en.wikipedia.org/wiki/Church%E2%80%93Turing_thesis</p>
+<p>You can prove that by writing a simulator for a Turing machine in your language. Since Turing proved his machine can compute any computable function, by extension, that means your language can too. All you need to do is translate the function into a Turing machine, and then run that on your simulator.</p>
+<p>If your language is expressive enough to do that, it&#x27;s considered <strong>Turing-complete</strong>. Turing machines are pretty dang simple, so it doesn&#x27;t take much power to do this. You basically need arithmetic, a little control flow, and the ability to allocate and use (theoretically) arbitrary amounts of memory. We&#x27;ve got the first. By the end of this chapter, we&#x27;ll have the &lt;span name=&quot;memory&quot;&gt;second&lt;/span&gt;.</p>
+<p>&lt;aside name=&quot;memory&quot;&gt;</p>
+<p>We <em>almost</em> have the third too. You can create and concatenate strings of arbitrary size, so you can <em>store</em> unbounded memory. But we don&#x27;t have any way to access parts of a string.</p>
+<p>&lt;/aside&gt;</p>
+<h2>Conditional Execution</h2>
+<p>Enough history, let&#x27;s jazz up our language. We can divide control flow roughly into two kinds:</p>
+<ul>
+<li>  <strong>Conditional</strong> or <strong>branching control flow</strong> is used to <em>not</em> execute</li>
+</ul>
+<p>    some piece of code. Imperatively, you can think of it as jumping <em>ahead</em>     over a region of code.</p>
+<ul>
+<li>  <strong>Looping control flow</strong> executes a chunk of code more than once. It jumps</li>
+</ul>
+<p>    <em>back</em> so that you can do something again. Since you don&#x27;t usually want     <em>infinite</em> loops, it typically has some conditional logic to know when to     stop looping as well.</p>
+<p>Branching is simpler, so we&#x27;ll start there. C-derived languages have two main conditional execution features, the <code>if</code> statement and the perspicaciously named &quot;conditional&quot; &lt;span name=&quot;ternary&quot;&gt;operator&lt;/span&gt; (<code>?:</code>). An <code>if</code> statement lets you conditionally execute statements and the conditional operator lets you conditionally execute expressions.</p>
+<p>&lt;aside name=&quot;ternary&quot;&gt;</p>
+<p>The conditional operator is also called the &quot;ternary&quot; operator because it&#x27;s the only operator in C that takes three operands.</p>
+<p>&lt;/aside&gt;</p>
+<p>For simplicity&#x27;s sake, Lox doesn&#x27;t have a conditional operator, so let&#x27;s get our <code>if</code> statement on. Our statement grammar gets a new production.</p>
+<p>&lt;span name=&quot;semicolon&quot;&gt;&lt;/span&gt;</p>
+<pre class="ebnf"><code>statement      → exprStmt
+               | ifStmt
+               | printStmt
+               | block ;
+
+ifStmt         → &quot;if&quot; &quot;(&quot; expression &quot;)&quot; statement
+               ( &quot;else&quot; statement )? ;</code></pre>
+<p>&lt;aside name=&quot;semicolon&quot;&gt;</p>
+<p>The semicolons in the rules aren&#x27;t quoted, which means they are part of the grammar metasyntax, not Lox&#x27;s syntax. A block does not have a <code>;</code> at the end and an <code>if</code> statement doesn&#x27;t either, unless the then or else statement happens to be one that ends in a semicolon.</p>
+<p>&lt;/aside&gt;</p>
+<p>An <code>if</code> statement has an expression for the condition, then a statement to execute if the condition is truthy. Optionally, it may also have an <code>else</code> keyword and a statement to execute if the condition is falsey. The &lt;span name=&quot;if-ast&quot;&gt;syntax tree node&lt;/span&gt; has fields for each of those three pieces.</p>
+<p>^code if-ast (1 before, 1 after)</p>
+<p>&lt;aside name=&quot;if-ast&quot;&gt;</p>
+<p>The generated code for the new node is in [Appendix II][appendix-if</p>
+<p>].</p>
+<p>[appendix-if]: appendix-ii.html#if-statement</p>
+<p>&lt;/aside&gt;</p>
+<p>Like other statements, the parser recognizes an <code>if</code> statement by the leading <code>if</code> keyword.</p>
+<p>^code match-if (1 before, 1 after)</p>
+<p>When it finds one, it calls this new method to parse the rest:</p>
+<p>^code if-statement</p>
+<p>&lt;aside name=&quot;parens&quot;&gt;</p>
+<p>The parentheses around the condition are only half useful. You need some kind of delimiter <em>between</em> the condition and the then statement, otherwise the parser can&#x27;t tell when it has reached the end of the condition expression. But the <em>opening</em> parenthesis after <code>if</code> doesn&#x27;t do anything useful. Dennis Ritchie put it there so he could use <code>)</code> as the ending delimiter without having unbalanced parentheses.</p>
+<p>Other languages like Lua and some BASICs use a keyword like <code>then</code> as the ending delimiter and don&#x27;t have anything before the condition. Go and Swift instead require the statement to be a braced block. That lets them use the <code>{</code> at the beginning of the statement to tell when the condition is done.</p>
+<p>&lt;/aside&gt;</p>
+<p>As usual, the parsing code hews closely to the grammar. It detects an else clause by looking for the preceding <code>else</code> keyword. If there isn&#x27;t one, the <code>elseBranch</code> field in the syntax tree is <code>null</code>.</p>
+<p>That seemingly innocuous optional else has, in fact, opened up an ambiguity in our grammar. Consider:</p>
+<pre class="lox"><code>if (first) if (second) whenTrue(); else whenFalse();</code></pre>
+<p>Here&#x27;s the riddle: Which <code>if</code> statement does that else clause belong to? This isn&#x27;t just a theoretical question about how we notate our grammar. It actually affects how the code executes:</p>
+<ul>
+<li>  If we attach the else to the first <code>if</code> statement, then <code>whenFalse()</code> is</li>
+</ul>
+<p>    called if <code>first</code> is falsey, regardless of what value <code>second</code> has.</p>
+<ul>
+<li>  If we attach it to the second <code>if</code> statement, then <code>whenFalse()</code> is only</li>
+</ul>
+<p>    called if <code>first</code> is truthy and <code>second</code> is falsey.</p>
+<p>Since else clauses are optional, and there is no explicit delimiter marking the end of the <code>if</code> statement, the grammar is ambiguous when you nest <code>if</code>s in this way. This classic pitfall of syntax is called the **[dangling else][</p>
+<p>]** problem.</p>
+<p>[dangling else]: https://en.wikipedia.org/wiki/Dangling_else</p>
+<p>&lt;span name=&quot;else&quot;&gt;&lt;/span&gt;</p>
+<p>&lt;img class=&quot;above&quot; src=&quot;image/control-flow/dangling-else.png&quot; alt=&quot;Two ways the else can be interpreted.&quot; /&gt;</p>
+<p>&lt;aside name=&quot;else&quot;&gt;</p>
+<p>Here, formatting highlights the two ways the else could be parsed. But note that since whitespace characters are ignored by the parser, this is only a guide to the human reader.</p>
+<p>&lt;/aside&gt;</p>
+<p>It <em>is</em> possible to define a context-free grammar that avoids the ambiguity directly, but it requires splitting most of the statement rules into pairs, one that allows an <code>if</code> with an <code>else</code> and one that doesn&#x27;t. It&#x27;s annoying.</p>
+<p>Instead, most languages and parsers avoid the problem in an ad hoc way. No matter what hack they use to get themselves out of the trouble, they always choose the same interpretation -- the <code>else</code> is bound to the nearest <code>if</code> that precedes it.</p>
+<p>Our parser conveniently does that already. Since <code>ifStatement()</code> eagerly looks for an <code>else</code> before returning, the innermost call to a nested series will claim the else clause for itself before returning to the outer <code>if</code> statements.</p>
+<p>Syntax in hand, we are ready to interpret.</p>
+<p>^code visit-if</p>
+<p>The interpreter implementation is a thin wrapper around the self-same Java code. It evaluates the condition. If truthy, it executes the then branch. Otherwise, if there is an else branch, it executes that.</p>
+<p>If you compare this code to how the interpreter handles other syntax we&#x27;ve implemented, the part that makes control flow special is that Java <code>if</code> statement. Most other syntax trees always evaluate their subtrees. Here, we may not evaluate the then or else statement. If either of those has a side effect, the choice not to evaluate it becomes user visible.</p>
+<h2>Logical Operators</h2>
+<p>Since we don&#x27;t have the conditional operator, you might think we&#x27;re done with branching, but no. Even without the ternary operator, there are two other operators that are technically control flow constructs -- the logical operators <code>and</code> and <code>or</code>.</p>
+<p>These aren&#x27;t like other binary operators because they <strong>short-circuit</strong>. If, after evaluating the left operand, we know what the result of the logical expression must be, we don&#x27;t evaluate the right operand. For example:</p>
+<pre class="lox"><code>false and sideEffect();</code></pre>
+<p>For an <code>and</code> expression to evaluate to something truthy, both operands must be truthy. We can see as soon as we evaluate the left <code>false</code> operand that that isn&#x27;t going to be the case, so there&#x27;s no need to evaluate <code>sideEffect()</code> and it gets skipped.</p>
+<p>This is why we didn&#x27;t implement the logical operators with the other binary operators. Now we&#x27;re ready. The two new operators are low in the precedence table. Similar to <code>||</code> and <code>&amp;&amp;</code> in C, they each have their &lt;span name=&quot;logical&quot;&gt;own&lt;/span&gt; precedence with <code>or</code> lower than <code>and</code>. We slot them right between <code>assignment</code> and <code>equality</code>.</p>
+<p>&lt;aside name=&quot;logical&quot;&gt;</p>
+<p>I&#x27;ve always wondered why they don&#x27;t have the same precedence, like the various comparison or equality operators do.</p>
+<p>&lt;/aside&gt;</p>
+<pre class="ebnf"><code>expression     → assignment ;
+assignment     → IDENTIFIER &quot;=&quot; assignment
+               | logic_or ;
+logic_or       → logic_and ( &quot;or&quot; logic_and )* ;
+logic_and      → equality ( &quot;and&quot; equality )* ;</code></pre>
+<p>Instead of falling back to <code>equality</code>, <code>assignment</code> now cascades to <code>logic_or</code>. The two new rules, <code>logic_or</code> and <code>logic_and</code>, are &lt;span name=&quot;same&quot;&gt;similar&lt;/span&gt; to other binary operators. Then <code>logic_and</code> calls out to <code>equality</code> for its operands, and we chain back to the rest of the expression rules.</p>
+<p>&lt;aside name=&quot;same&quot;&gt;</p>
+<p>The <em>syntax</em> doesn&#x27;t care that they short-circuit. That&#x27;s a semantic concern.</p>
+<p>&lt;/aside&gt;</p>
+<p>We could reuse the existing Expr.Binary class for these two new expressions since they have the same fields. But then <code>visitBinaryExpr()</code> would have to check to see if the operator is one of the logical operators and use a different code path to handle the short circuiting. I think it&#x27;s cleaner to define a &lt;span name=&quot;logical-ast&quot;&gt;new class&lt;/span&gt; for these operators so that they get their own visit method.</p>
+<p>^code logical-ast (1 before, 1 after)</p>
+<p>&lt;aside name=&quot;logical-ast&quot;&gt;</p>
+<p>The generated code for the new node is in [Appendix II][appendix-logical</p>
+<p>].</p>
+<p>[appendix-logical]: appendix-ii.html#logical-expression</p>
+<p>&lt;/aside&gt;</p>
+<p>To weave the new expressions into the parser, we first change the parsing code for assignment to call <code>or()</code>.</p>
+<p>^code or-in-assignment (1 before, 2 after)</p>
+<p>The code to parse a series of <code>or</code> expressions mirrors other binary operators.</p>
+<p>^code or</p>
+<p>Its operands are the next higher level of precedence, the new <code>and</code> expression.</p>
+<p>^code and</p>
+<p>That calls <code>equality()</code> for its operands, and with that, the expression parser is all tied back together again. We&#x27;re ready to interpret.</p>
+<p>^code visit-logical</p>
+<p>If you compare this to the [earlier chapter&#x27;s][evaluating</p>
+<p>] <code>visitBinaryExpr()</code> method, you can see the difference. Here, we evaluate the left operand first. We look at its value to see if we can short-circuit. If not, and only then, do we evaluate the right operand.</p>
+<p>[evaluating]: evaluating-expressions.html</p>
+<p>The other interesting piece here is deciding what actual value to return. Since Lox is dynamically typed, we allow operands of any type and use truthiness to determine what each operand represents. We apply similar reasoning to the result. Instead of promising to literally return <code>true</code> or <code>false</code>, a logic operator merely guarantees it will return a value with appropriate truthiness.</p>
+<p>Fortunately, we have values with proper truthiness right at hand -- the results of the operands themselves. So we use those. For example:</p>
+<pre class="lox"><code>print &quot;hi&quot; or 2; // &quot;hi&quot;.
+print nil or &quot;yes&quot;; // &quot;yes&quot;.</code></pre>
+<p>On the first line, <code>&quot;hi&quot;</code> is truthy, so the <code>or</code> short-circuits and returns that. On the second line, <code>nil</code> is falsey, so it evaluates and returns the second operand, <code>&quot;yes&quot;</code>.</p>
+<p>That covers all of the branching primitives in Lox. We&#x27;re ready to jump ahead to loops. You see what I did there? <em>Jump. Ahead.</em> Get it? See, it&#x27;s like a reference to... oh, forget it.</p>
+<h2>While Loops</h2>
+<p>Lox features two looping control flow statements, <code>while</code> and <code>for</code>. The <code>while</code> loop is the simpler one, so we&#x27;ll start there. Its grammar is the same as in C.</p>
+<pre class="ebnf"><code>statement      → exprStmt
+               | ifStmt
+               | printStmt
+               | whileStmt
+               | block ;
+
+whileStmt      → &quot;while&quot; &quot;(&quot; expression &quot;)&quot; statement ;</code></pre>
+<p>We add another clause to the statement rule that points to the new rule for while. It takes a <code>while</code> keyword, followed by a parenthesized condition expression, then a statement for the body. That new grammar rule gets a &lt;span name=&quot;while-ast&quot;&gt;syntax tree node&lt;/span&gt;.</p>
+<p>^code while-ast (1 before, 1 after)</p>
+<p>&lt;aside name=&quot;while-ast&quot;&gt;</p>
+<p>The generated code for the new node is in [Appendix II][appendix-while</p>
+<p>].</p>
+<p>[appendix-while]: appendix-ii.html#while-statement</p>
+<p>&lt;/aside&gt;</p>
+<p>The node stores the condition and body. Here you can see why it&#x27;s nice to have separate base classes for expressions and statements. The field declarations make it clear that the condition is an expression and the body is a statement.</p>
+<p>Over in the parser, we follow the same process we used for <code>if</code> statements. First, we add another case in <code>statement()</code> to detect and match the leading keyword.</p>
+<p>^code match-while (1 before, 1 after)</p>
+<p>That delegates the real work to this method:</p>
+<p>^code while-statement</p>
+<p>The grammar is dead simple and this is a straight translation of it to Java. Speaking of translating straight to Java, here&#x27;s how we execute the new syntax:</p>
+<p>^code visit-while</p>
+<p>Like the visit method for <code>if</code>, this visitor uses the corresponding Java feature. This method isn&#x27;t complex, but it makes Lox much more powerful. We can finally write a program whose running time isn&#x27;t strictly bound by the length of the source code.</p>
+<h2>For Loops</h2>
+<p>We&#x27;re down to the last control flow construct, &lt;span name=&quot;for&quot;&gt;Ye Olde&lt;/span&gt; C-style <code>for</code> loop. I probably don&#x27;t need to remind you, but it looks like this:</p>
+<pre class="lox"><code>for (var i = 0; i &lt; 10; i = i + 1) print i;</code></pre>
+<p>In grammarese, that&#x27;s:</p>
+<pre class="ebnf"><code>statement      → exprStmt
+               | forStmt
+               | ifStmt
+               | printStmt
+               | whileStmt
+               | block ;
+
+forStmt        → &quot;for&quot; &quot;(&quot; ( varDecl | exprStmt | &quot;;&quot; )
+                 expression? &quot;;&quot;
+                 expression? &quot;)&quot; statement ;</code></pre>
+<p>&lt;aside name=&quot;for&quot;&gt;</p>
+<p>Most modern languages have a higher-level looping statement for iterating over arbitrary user-defined sequences. C# has <code>foreach</code>, Java has &quot;enhanced for&quot;, even C++ has range-based <code>for</code> statements now. Those offer cleaner syntax than C&#x27;s <code>for</code> statement by implicitly calling into an iteration protocol that the object being looped over supports.</p>
+<p>I love those. For Lox, though, we&#x27;re limited by building up the interpreter a chapter at a time. We don&#x27;t have objects and methods yet, so we have no way of defining an iteration protocol that the <code>for</code> loop could use. So we&#x27;ll stick with the old school C <code>for</code> loop. Think of it as &quot;vintage&quot;. The fixie of control flow statements.</p>
+<p>&lt;/aside&gt;</p>
+<p>Inside the parentheses, you have three clauses separated by semicolons:</p>
+<p>1.  The first clause is the <em>initializer</em>. It is executed exactly once, before     anything else. It&#x27;s usually an expression, but for convenience, we also     allow a variable declaration. In that case, the variable is scoped to the     rest of the <code>for</code> loop -- the other two clauses and the body.</p>
+<p>2.  Next is the <em>condition</em>. As in a <code>while</code> loop, this expression controls when     to exit the loop. It&#x27;s evaluated once at the beginning of each iteration,     including the first. If the result is truthy, it executes the loop body.     Otherwise, it bails.</p>
+<p>3.  The last clause is the <em>increment</em>. It&#x27;s an arbitrary expression that does     some work at the end of each loop iteration. The result of the expression is     discarded, so it must have a side effect to be useful. In practice, it     usually increments a variable.</p>
+<p>Any of these clauses can be omitted. Following the closing parenthesis is a statement for the body, which is typically a block.</p>
+<h3>Desugaring</h3>
+<p>That&#x27;s a lot of machinery, but note that none of it does anything you couldn&#x27;t do with the statements we already have. If <code>for</code> loops didn&#x27;t support initializer clauses, you could just put the initializer expression before the <code>for</code> statement. Without an increment clause, you could simply put the increment expression at the end of the body yourself.</p>
+<p>In other words, Lox doesn&#x27;t <em>need</em> <code>for</code> loops, they just make some common code patterns more pleasant to write. These kinds of features are called &lt;span name=&quot;sugar&quot;&gt;<strong>syntactic sugar</strong>&lt;/span&gt;. For example, the previous <code>for</code> loop could be rewritten like so:</p>
+<p>&lt;aside name=&quot;sugar&quot;&gt;</p>
+<p>This delightful turn of phrase was coined by Peter J. Landin in 1964 to describe how some of the nice expression forms supported by languages like ALGOL were a sweetener sprinkled over the more fundamental -- but presumably less palatable -- lambda calculus underneath.</p>
+<p>&lt;img class=&quot;above&quot; src=&quot;image/control-flow/sugar.png&quot; alt=&quot;Slightly more than a spoonful of sugar.&quot; /&gt;</p>
+<p>&lt;/aside&gt;</p>
+<pre class="lox"><code>{
+  var i = 0;
+  while (i &lt; 10) {
+    print i;
+    i = i + 1;
+  }
+}</code></pre>
+<p>This script has the exact same semantics as the previous one, though it&#x27;s not as easy on the eyes. Syntactic sugar features like Lox&#x27;s <code>for</code> loop make a language more pleasant and productive to work in. But, especially in sophisticated language implementations, every language feature that requires back-end support and optimization is expensive.</p>
+<p>We can have our cake and eat it too by &lt;span name=&quot;caramel&quot;&gt;<strong>desugaring</strong>&lt;/span&gt;. That funny word describes a process where the front end takes code using syntax sugar and translates it to a more primitive form that the back end already knows how to execute.</p>
+<p>&lt;aside name=&quot;caramel&quot;&gt;</p>
+<p>Oh, how I wish the accepted term for this was &quot;caramelization&quot;. Why introduce a metaphor if you aren&#x27;t going to stick with it?</p>
+<p>&lt;/aside&gt;</p>
+<p>We&#x27;re going to desugar <code>for</code> loops to the <code>while</code> loops and other statements the interpreter already handles. In our simple interpreter, desugaring really doesn&#x27;t save us much work, but it does give me an excuse to introduce you to the technique. So, unlike the previous statements, we <em>won&#x27;t</em> add a new syntax tree node. Instead, we go straight to parsing. First, add an import we&#x27;ll need soon.</p>
+<p>^code import-arrays (1 before, 1 after)</p>
+<p>Like every statement, we start parsing a <code>for</code> loop by matching its keyword.</p>
+<p>^code match-for (1 before, 1 after)</p>
+<p>Here is where it gets interesting. The desugaring is going to happen here, so we&#x27;ll build this method a piece at a time, starting with the opening parenthesis before the clauses.</p>
+<p>^code for-statement</p>
+<p>The first clause following that is the initializer.</p>
+<p>^code for-initializer (2 before, 1 after)</p>
+<p>If the token following the <code>(</code> is a semicolon then the initializer has been omitted. Otherwise, we check for a <code>var</code> keyword to see if it&#x27;s a &lt;span name=&quot;variable&quot;&gt;variable&lt;/span&gt; declaration. If neither of those matched, it must be an expression. We parse that and wrap it in an expression statement so that the initializer is always of type Stmt.</p>
+<p>&lt;aside name=&quot;variable&quot;&gt;</p>
+<p>In a previous chapter, I said we can split expression and statement syntax trees into two separate class hierarchies because there&#x27;s no single place in the grammar that allows both an expression and a statement. That wasn&#x27;t <em>entirely</em> true, I guess.</p>
+<p>&lt;/aside&gt;</p>
+<p>Next up is the condition.</p>
+<p>^code for-condition (2 before, 1 after)</p>
+<p>Again, we look for a semicolon to see if the clause has been omitted. The last clause is the increment.</p>
+<p>^code for-increment (1 before, 1 after)</p>
+<p>It&#x27;s similar to the condition clause except this one is terminated by the closing parenthesis. All that remains is the &lt;span name=&quot;body&quot;&gt;body&lt;/span&gt;.</p>
+<p>&lt;aside name=&quot;body&quot;&gt;</p>
+<p>Is it just me or does that sound morbid? &quot;All that remained... was the <em>body</em>&quot;.</p>
+<p>&lt;/aside&gt;</p>
+<p>^code for-body (1 before, 1 after)</p>
+<p>We&#x27;ve parsed all of the various pieces of the <code>for</code> loop and the resulting AST nodes are sitting in a handful of Java local variables. This is where the desugaring comes in. We take those and use them to synthesize syntax tree nodes that express the semantics of the <code>for</code> loop, like the hand-desugared example I showed you earlier.</p>
+<p>The code is a little simpler if we work backward, so we start with the increment clause.</p>
+<p>^code for-desugar-increment (2 before, 1 after)</p>
+<p>The increment, if there is one, executes after the body in each iteration of the loop. We do that by replacing the body with a little block that contains the original body followed by an expression statement that evaluates the increment.</p>
+<p>^code for-desugar-condition (2 before, 1 after)</p>
+<p>Next, we take the condition and the body and build the loop using a primitive <code>while</code> loop. If the condition is omitted, we jam in <code>true</code> to make an infinite loop.</p>
+<p>^code for-desugar-initializer (2 before, 1 after)</p>
+<p>Finally, if there is an initializer, it runs once before the entire loop. We do that by, again, replacing the whole statement with a block that runs the initializer and then executes the loop.</p>
+<p>That&#x27;s it. Our interpreter now supports C-style <code>for</code> loops and we didn&#x27;t have to touch the Interpreter class at all. Since we desugared to nodes the interpreter already knows how to visit, there is no more work to do.</p>
+<p>Finally, Lox is powerful enough to entertain us, at least for a few minutes. Here&#x27;s a tiny program to print the first 21 elements in the Fibonacci sequence:</p>
+<pre class="lox"><code>var a = 0;
+var temp;
+
+for (var b = 1; a &lt; 10000; b = temp + b) {
+  print a;
+  temp = a;
+  a = b;
+}</code></pre>
+<p>&lt;div class=&quot;challenges&quot;&gt;</p>
+<h2>Challenges</h2>
+<p>1.  A few chapters from now, when Lox supports first-class functions and dynamic     dispatch, we technically won&#x27;t <em>need</em> branching statements built into the     language. Show how conditional execution can be implemented in terms of     those. Name a language that uses this technique for its control flow.</p>
+<p>2.  Likewise, looping can be implemented using those same tools, provided our     interpreter supports an important optimization. What is it, and why is it     necessary? Name a language that uses this technique for iteration.</p>
+<p>3.  Unlike Lox, most other C-style languages also support <code>break</code> and <code>continue</code>     statements inside loops. Add support for <code>break</code> statements.</p>
+<p>    The syntax is a <code>break</code> keyword followed by a semicolon. It should be a     syntax error to have a <code>break</code> statement appear outside of any enclosing     loop. At runtime, a <code>break</code> statement causes execution to jump to the end of     the nearest enclosing loop and proceeds from there. Note that the <code>break</code>     may be nested inside other blocks and <code>if</code> statements that also need to be     exited.</p>
+<p>&lt;/div&gt;</p>
+<p>&lt;div class=&quot;design-note&quot;&gt;</p>
+<h2>Design Note: Spoonfuls of Syntactic Sugar</h2>
+<p>When you design your own language, you choose how much syntactic sugar to pour into the grammar. Do you make an unsweetened health food where each semantic operation maps to a single syntactic unit, or some decadent dessert where every bit of behavior can be expressed ten different ways? Successful languages inhabit all points along this continuum.</p>
+<p>On the extreme acrid end are those with ruthlessly minimal syntax like Lisp, Forth, and Smalltalk. Lispers famously claim their language &quot;has no syntax&quot;, while Smalltalkers proudly show that you can fit the entire grammar on an index card. This tribe has the philosophy that the <em>language</em> doesn&#x27;t need syntactic sugar. Instead, the minimal syntax and semantics it provides are powerful enough to let library code be as expressive as if it were part of the language itself.</p>
+<p>Near these are languages like C, Lua, and Go. They aim for simplicity and clarity over minimalism. Some, like Go, deliberately eschew both syntactic sugar and the kind of syntactic extensibility of the previous category. They want the syntax to get out of the way of the semantics, so they focus on keeping both the grammar and libraries simple. Code should be obvious more than beautiful.</p>
+<p>Somewhere in the middle you have languages like Java, C#, and Python. Eventually you reach Ruby, C++, Perl, and D -- languages which have stuffed so much syntax into their grammar, they are running out of punctuation characters on the keyboard.</p>
+<p>To some degree, location on the spectrum correlates with age. It&#x27;s relatively easy to add bits of syntactic sugar in later releases. New syntax is a crowd pleaser, and it&#x27;s less likely to break existing programs than mucking with the semantics. Once added, you can never take it away, so languages tend to sweeten with time. One of the main benefits of creating a new language from scratch is it gives you an opportunity to scrape off those accumulated layers of frosting and start over.</p>
+<p>Syntactic sugar has a bad rap among the PL intelligentsia. There&#x27;s a real fetish for minimalism in that crowd. There is some justification for that. Poorly designed, unneeded syntax raises the cognitive load without adding enough expressiveness to carry its weight. Since there is always pressure to cram new features into the language, it takes discipline and a focus on simplicity to avoid bloat. Once you add some syntax, you&#x27;re stuck with it, so it&#x27;s smart to be parsimonious.</p>
+<p>At the same time, most successful languages do have fairly complex grammars, at least by the time they are widely used. Programmers spend a ton of time in their language of choice, and a few niceties here and there really can improve the comfort and efficiency of their work.</p>
+<p>Striking the right balance -- choosing the right level of sweetness for your language -- relies on your own sense of taste.</p>
+<p>&lt;/div&gt; </p>

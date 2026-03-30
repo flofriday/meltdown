@@ -1,0 +1,221 @@
+<blockquote> And as imagination bodies forth&lt;br /&gt;</blockquote><blockquote> The forms of things unknown, the poet&#x27;s pen&lt;br /&gt;</blockquote><blockquote> Turns them to shapes and gives to airy nothing&lt;br /&gt;</blockquote><blockquote> A local habitation and a name.</blockquote><blockquote></blockquote><blockquote> &lt;cite&gt;William Shakespeare, &lt;em&gt;A Midsummer Night&#x27;s Dream&lt;/em&gt;&lt;/cite&gt;</blockquote><p>The [last chapter][</p>
+<p>] introduced variables to clox, but only of the &lt;span name=&quot;global&quot;&gt;global&lt;/span&gt; variety. In this chapter, we&#x27;ll extend that to support blocks, block scope, and local variables. In jlox, we managed to pack all of that and globals into one chapter. For clox, that&#x27;s two chapters worth of work partially because, frankly, everything takes more effort in C.</p>
+<p>&lt;aside name=&quot;global&quot;&gt;</p>
+<p>There&#x27;s probably some dumb &quot;think globally, act locally&quot; joke here, but I&#x27;m struggling to find it.</p>
+<p>&lt;/aside&gt;</p>
+<p>[last chapter]: global-variables.html</p>
+<p>But an even more important reason is that our approach to local variables will be quite different from how we implemented globals. Global variables are late bound in Lox. &quot;Late&quot; in this context means &quot;resolved after compile time&quot;. That&#x27;s good for keeping the compiler simple, but not great for performance. Local variables are one of the most-used &lt;span name=&quot;params&quot;&gt;parts&lt;/span&gt; of a language. If locals are slow, <em>everything</em> is slow. So we want a strategy for local variables that&#x27;s as efficient as possible.</p>
+<p>&lt;aside name=&quot;params&quot;&gt;</p>
+<p>Function parameters are also heavily used. They work like local variables too, so we&#x27;ll use the same implementation technique for them.</p>
+<p>&lt;/aside&gt;</p>
+<p>Fortunately, lexical scoping is here to help us. As the name implies, lexical scope means we can resolve a local variable just by looking at the text of the program -- locals are <em>not</em> late bound. Any processing work we do in the compiler is work we <em>don&#x27;t</em> have to do at runtime, so our implementation of local variables will lean heavily on the compiler.</p>
+<h2>Representing Local Variables</h2>
+<p>The nice thing about hacking on a programming language in modern times is there&#x27;s a long lineage of other languages to learn from. So how do C and Java manage their local variables? Why, on the stack, of course! They typically use the native stack mechanisms supported by the chip and OS. That&#x27;s a little too low level for us, but inside the virtual world of clox, we have our own stack we can use.</p>
+<p>Right now, we only use it for holding on to <strong>temporaries</strong> -- short-lived blobs of data that we need to remember while computing an expression. As long as we don&#x27;t get in the way of those, we can stuff our local variables onto the stack too. This is great for performance. Allocating space for a new local requires only incrementing the <code>stackTop</code> pointer, and freeing is likewise a decrement. Accessing a variable from a known stack slot is an indexed array lookup.</p>
+<p>We do need to be careful, though. The VM expects the stack to behave like, well, a stack. We have to be OK with allocating new locals only on the top of the stack, and we have to accept that we can discard a local only when nothing is above it on the stack. Also, we need to make sure temporaries don&#x27;t interfere.</p>
+<p>Conveniently, the design of Lox is in &lt;span name=&quot;harmony&quot;&gt;harmony&lt;/span&gt; with these constraints. New locals are always created by declaration statements. Statements don&#x27;t nest inside expressions, so there are never any temporaries on the stack when a statement begins executing. Blocks are strictly nested. When a block ends, it always takes the innermost, most recently declared locals with it. Since those are also the locals that came into scope last, they should be on top of the stack where we need them.</p>
+<p>&lt;aside name=&quot;harmony&quot;&gt;</p>
+<p>This alignment obviously isn&#x27;t coincidental. I designed Lox to be amenable to single-pass compilation to stack-based bytecode. But I didn&#x27;t have to tweak the language too much to fit in those restrictions. Most of its design should feel pretty natural.</p>
+<p>This is in large part because the history of languages is deeply tied to single-pass compilation and -- to a lesser degree -- stack-based architectures. Lox&#x27;s block scoping follows a tradition stretching back to BCPL. As programmers, our intuition of what&#x27;s &quot;normal&quot; in a language is informed even today by the hardware limitations of yesteryear.</p>
+<p>&lt;/aside&gt;</p>
+<p>Step through this example program and watch how the local variables come in and go out of scope:</p>
+<p>&lt;img src=&quot;image/local-variables/scopes.png&quot; alt=&quot;A series of local variables come into and out of scope in a stack-like fashion.&quot; /&gt;</p>
+<p>See how they fit a stack perfectly? It seems that the stack will work for storing locals at runtime. But we can go further than that. Not only do we know <em>that</em> they will be on the stack, but we can even pin down precisely <em>where</em> they will be on the stack. Since the compiler knows exactly which local variables are in scope at any point in time, it can effectively simulate the stack during compilation and note &lt;span name=&quot;fn&quot;&gt;where&lt;/span&gt; in the stack each variable lives.</p>
+<p>We&#x27;ll take advantage of this by using these stack offsets as operands for the bytecode instructions that read and store local variables. This makes working with locals deliciously fast -- as simple as indexing into an array.</p>
+<p>&lt;aside name=&quot;fn&quot;&gt;</p>
+<p>In this chapter, locals start at the bottom of the VM&#x27;s stack array and are indexed from there. When we add [functions][</p>
+<p>], that scheme gets a little more complex. Each function needs its own region of the stack for its parameters and local variables. But, as we&#x27;ll see, that doesn&#x27;t add as much complexity as you might expect.</p>
+<p>[functions]: calls-and-functions.html</p>
+<p>&lt;/aside&gt;</p>
+<p>There&#x27;s a lot of state we need to track in the compiler to make this whole thing go, so let&#x27;s get started there. In jlox, we used a linked chain of &quot;environment&quot; HashMaps to track which local variables were currently in scope. That&#x27;s sort of the classic, schoolbook way of representing lexical scope. For clox, as usual, we&#x27;re going a little closer to the metal. All of the state lives in a new struct.</p>
+<p>^code compiler-struct (1 before, 2 after)</p>
+<p>We have a simple, flat array of all locals that are in scope during each point in the compilation process. They are &lt;span name=&quot;order&quot;&gt;ordered&lt;/span&gt; in the array in the order that their declarations appear in the code. Since the instruction operand we&#x27;ll use to encode a local is a single byte, our VM has a hard limit on the number of locals that can be in scope at once. That means we can also give the locals array a fixed size.</p>
+<p>&lt;aside name=&quot;order&quot;&gt;</p>
+<p>We&#x27;re writing a single-pass compiler, so it&#x27;s not like we have <em>too</em> many other options for how to order them in the array.</p>
+<p>&lt;/aside&gt;</p>
+<p>^code uint8-count (1 before, 2 after)</p>
+<p>Back in the Compiler struct, the <code>localCount</code> field tracks how many locals are in scope -- how many of those array slots are in use. We also track the &quot;scope depth&quot;. This is the number of blocks surrounding the current bit of code we&#x27;re compiling.</p>
+<p>Our Java interpreter used a chain of maps to keep each block&#x27;s variables separate from other blocks&#x27;. This time, we&#x27;ll simply number variables with the level of nesting where they appear. Zero is the global scope, one is the first top-level block, two is inside that, you get the idea. We use this to track which block each local belongs to so that we know which locals to discard when a block ends.</p>
+<p>Each local in the array is one of these:</p>
+<p>^code local-struct (1 before, 2 after)</p>
+<p>We store the name of the variable. When we&#x27;re resolving an identifier, we compare the identifier&#x27;s lexeme with each local&#x27;s name to find a match. It&#x27;s pretty hard to resolve a variable if you don&#x27;t know its name. The <code>depth</code> field records the scope depth of the block where the local variable was declared. That&#x27;s all the state we need for now.</p>
+<p>This is a very different representation from what we had in jlox, but it still lets us answer all of the same questions our compiler needs to ask of the lexical environment. The next step is figuring out how the compiler <em>gets</em> at this state. If we were &lt;span name=&quot;thread&quot;&gt;principled&lt;/span&gt; engineers, we&#x27;d give each function in the front end a parameter that accepts a pointer to a Compiler. We&#x27;d create a Compiler at the beginning and carefully thread it through each function call... but that would mean a lot of boring changes to the code we already wrote, so here&#x27;s a global variable instead:</p>
+<p>&lt;aside name=&quot;thread&quot;&gt;</p>
+<p>In particular, if we ever want to use our compiler in a multi-threaded application, possibly with multiple compilers running in parallel, then using a global variable is a <em>bad</em> idea.</p>
+<p>&lt;/aside&gt;</p>
+<p>^code current-compiler (1 before, 1 after)</p>
+<p>Here&#x27;s a little function to initialize the compiler:</p>
+<p>^code init-compiler</p>
+<p>When we first start up the VM, we call it to get everything into a clean state.</p>
+<p>^code compiler (1 before, 1 after)</p>
+<p>Our compiler has the data it needs, but not the operations on that data. There&#x27;s no way to create and destroy scopes, or add and resolve variables. We&#x27;ll add those as we need them. First, let&#x27;s start building some language features.</p>
+<h2>Block Statements</h2>
+<p>Before we can have any local variables, we need some local scopes. These come from two things: function bodies and &lt;span name=&quot;block&quot;&gt;blocks&lt;/span&gt;. Functions are a big chunk of work that we&#x27;ll tackle in [a later chapter][functions</p>
+<p>], so for now we&#x27;re only going to do blocks. As usual, we start with the syntax. The new grammar we&#x27;ll introduce is:</p>
+<pre class="ebnf"><code>statement      → exprStmt
+               | printStmt
+               | block ;
+
+block          → &quot;{&quot; declaration* &quot;}&quot; ;</code></pre>
+<p>&lt;aside name=&quot;block&quot;&gt;</p>
+<p>When you think about it, &quot;block&quot; is a weird name. Used metaphorically, &quot;block&quot; usually means a small indivisible unit, but for some reason, the Algol 60 committee decided to use it to refer to a <em>compound</em> structure -- a series of statements. It could be worse, I suppose. Algol 58 called <code>begin</code> and <code>end</code> &quot;statement parentheses&quot;.</p>
+<p>&lt;img src=&quot;image/local-variables/block.png&quot; alt=&quot;A cinder block.&quot; class=&quot;above&quot; /&gt;</p>
+<p>&lt;/aside&gt;</p>
+<p>Blocks are a kind of statement, so the rule for them goes in the <code>statement</code> production. The corresponding code to compile one looks like this:</p>
+<p>^code parse-block (2 before, 1 after)</p>
+<p>After &lt;span name=&quot;helper&quot;&gt;parsing&lt;/span&gt; the initial curly brace, we use this helper function to compile the rest of the block:</p>
+<p>&lt;aside name=&quot;helper&quot;&gt;</p>
+<p>This function will come in handy later for compiling function bodies.</p>
+<p>&lt;/aside&gt;</p>
+<p>^code block</p>
+<p>It keeps parsing declarations and statements until it hits the closing brace. As we do with any loop in the parser, we also check for the end of the token stream. This way, if there&#x27;s a malformed program with a missing closing curly, the compiler doesn&#x27;t get stuck in a loop.</p>
+<p>Executing a block simply means executing the statements it contains, one after the other, so there isn&#x27;t much to compiling them. The semantically interesting thing blocks do is create scopes. Before we compile the body of a block, we call this function to enter a new local scope:</p>
+<p>^code begin-scope</p>
+<p>In order to &quot;create&quot; a scope, all we do is increment the current depth. This is certainly much faster than jlox, which allocated an entire new HashMap for each one. Given <code>beginScope()</code>, you can probably guess what <code>endScope()</code> does.</p>
+<p>^code end-scope</p>
+<p>That&#x27;s it for blocks and scopes -- more or less -- so we&#x27;re ready to stuff some variables into them.</p>
+<h2>Declaring Local Variables</h2>
+<p>Usually we start with parsing here, but our compiler already supports parsing and compiling variable declarations. We&#x27;ve got <code>var</code> statements, identifier expressions and assignment in there now. It&#x27;s just that the compiler assumes all variables are global. So we don&#x27;t need any new parsing support, we just need to hook up the new scoping semantics to the existing code.</p>
+<p>&lt;img src=&quot;image/local-variables/declaration.png&quot; alt=&quot;The code flow within varDeclaration().&quot; /&gt;</p>
+<p>Variable declaration parsing begins in <code>varDeclaration()</code> and relies on a couple of other functions. First, <code>parseVariable()</code> consumes the identifier token for the variable name, adds its lexeme to the chunk&#x27;s constant table as a string, and then returns the constant table index where it was added. Then, after <code>varDeclaration()</code> compiles the initializer, it calls <code>defineVariable()</code> to emit the bytecode for storing the variable&#x27;s value in the global variable hash table.</p>
+<p>Both of those helpers need a few changes to support local variables. In <code>parseVariable()</code>, we add:</p>
+<p>^code parse-local (1 before, 1 after)</p>
+<p>First, we &quot;declare&quot; the variable. I&#x27;ll get to what that means in a second. After that, we exit the function if we&#x27;re in a local scope. At runtime, locals aren&#x27;t looked up by name. There&#x27;s no need to stuff the variable&#x27;s name into the constant table, so if the declaration is inside a local scope, we return a dummy table index instead.</p>
+<p>Over in <code>defineVariable()</code>, we need to emit the code to store a local variable if we&#x27;re in a local scope. It looks like this:</p>
+<p>^code define-variable (1 before, 1 after)</p>
+<p>Wait, what? Yup. That&#x27;s it. There is no code to create a local variable at runtime. Think about what state the VM is in. It has already executed the code for the variable&#x27;s initializer (or the implicit <code>nil</code> if the user omitted an initializer), and that value is sitting right on top of the stack as the only remaining temporary. We also know that new locals are allocated at the top of the stack... right where that value already is. Thus, there&#x27;s nothing to do. The temporary simply <em>becomes</em> the local variable. It doesn&#x27;t get much more efficient than that.</p>
+<p>&lt;span name=&quot;locals&quot;&gt;&lt;/span&gt;</p>
+<p>&lt;img src=&quot;image/local-variables/local-slots.png&quot; alt=&quot;Walking through the bytecode execution showing that each initializer&#x27;s result ends up in the local&#x27;s slot.&quot; /&gt;</p>
+<p>&lt;aside name=&quot;locals&quot;&gt;</p>
+<p>The code on the left compiles to the sequence of instructions on the right.</p>
+<p>&lt;/aside&gt;</p>
+<p>OK, so what&#x27;s &quot;declaring&quot; about? Here&#x27;s what that does:</p>
+<p>^code declare-variable</p>
+<p>This is the point where the compiler records the existence of the variable. We only do this for locals, so if we&#x27;re in the top-level global scope, we just bail out. Because global variables are late bound, the compiler doesn&#x27;t keep track of which declarations for them it has seen.</p>
+<p>But for local variables, the compiler does need to remember that the variable exists. That&#x27;s what declaring it does -- it adds it to the compiler&#x27;s list of variables in the current scope. We implement that using another new function.</p>
+<p>^code add-local</p>
+<p>This initializes the next available Local in the compiler&#x27;s array of variables. It stores the variable&#x27;s &lt;span name=&quot;lexeme&quot;&gt;name&lt;/span&gt; and the depth of the scope that owns the variable.</p>
+<p>&lt;aside name=&quot;lexeme&quot;&gt;</p>
+<p>Worried about the lifetime of the string for the variable&#x27;s name? The Local directly stores a copy of the Token struct for the identifier. Tokens store a pointer to the first character of their lexeme and the lexeme&#x27;s length. That pointer points into the original source string for the script or REPL entry being compiled.</p>
+<p>As long as that string stays around during the entire compilation process -- which it must since, you know, we&#x27;re compiling it -- then all of the tokens pointing into it are fine.</p>
+<p>&lt;/aside&gt;</p>
+<p>Our implementation is fine for a correct Lox program, but what about invalid code? Let&#x27;s aim to be robust. The first error to handle is not really the user&#x27;s fault, but more a limitation of the VM. The instructions to work with local variables refer to them by slot index. That index is stored in a single-byte operand, which means the VM only supports up to 256 local variables in scope at one time.</p>
+<p>If we try to go over that, not only could we not refer to them at runtime, but the compiler would overwrite its own locals array, too. Let&#x27;s prevent that.</p>
+<p>^code too-many-locals (1 before, 1 after)</p>
+<p>The next case is trickier. Consider:</p>
+<pre class="lox"><code>{
+  var a = &quot;first&quot;;
+  var a = &quot;second&quot;;
+}</code></pre>
+<p>At the top level, Lox allows redeclaring a variable with the same name as a previous declaration because that&#x27;s useful for the REPL. But inside a local scope, that&#x27;s a pretty &lt;span name=&quot;rust&quot;&gt;weird&lt;/span&gt; thing to do. It&#x27;s likely to be a mistake, and many languages, including our own Lox, enshrine that assumption by making this an error.</p>
+<p>&lt;aside name=&quot;rust&quot;&gt;</p>
+<p>Interestingly, the Rust programming language <em>does</em> allow this, and idiomatic code relies on it.</p>
+<p>&lt;/aside&gt;</p>
+<p>Note that the above program is different from this one:</p>
+<pre class="lox"><code>{
+  var a = &quot;outer&quot;;
+  {
+    var a = &quot;inner&quot;;
+  }
+}</code></pre>
+<p>It&#x27;s OK to have two variables with the same name in <em>different</em> scopes, even when the scopes overlap such that both are visible at the same time. That&#x27;s shadowing, and Lox does allow that. It&#x27;s only an error to have two variables with the same name in the <em>same</em> local scope.</p>
+<p>We detect that error like so:</p>
+<p>^code existing-in-scope (1 before, 2 after)</p>
+<p>&lt;aside name=&quot;negative&quot;&gt;</p>
+<p>Don&#x27;t worry about that odd <code>depth != -1</code> part yet. We&#x27;ll get to what that&#x27;s about later.</p>
+<p>&lt;/aside&gt;</p>
+<p>Local variables are appended to the array when they&#x27;re declared, which means the current scope is always at the end of the array. When we declare a new variable, we start at the end and work backward, looking for an existing variable with the same name. If we find one in the current scope, we report the error. Otherwise, if we reach the beginning of the array or a variable owned by another scope, then we know we&#x27;ve checked all of the existing variables in the scope.</p>
+<p>To see if two identifiers are the same, we use this:</p>
+<p>^code identifiers-equal</p>
+<p>Since we know the lengths of both lexemes, we check that first. That will fail quickly for many non-equal strings. If the &lt;span name=&quot;hash&quot;&gt;lengths&lt;/span&gt; are the same, we check the characters using <code>memcmp()</code>. To get to <code>memcmp()</code>, we need an include.</p>
+<p>&lt;aside name=&quot;hash&quot;&gt;</p>
+<p>It would be a nice little optimization if we could check their hashes, but tokens aren&#x27;t full LoxStrings, so we haven&#x27;t calculated their hashes yet.</p>
+<p>&lt;/aside&gt;</p>
+<p>^code compiler-include-string (1 before, 2 after)</p>
+<p>With this, we&#x27;re able to bring variables into being. But, like ghosts, they linger on beyond the scope where they are declared. When a block ends, we need to put them to rest.</p>
+<p>^code pop-locals (1 before, 1 after)</p>
+<p>When we pop a scope, we walk backward through the local array looking for any variables declared at the scope depth we just left. We discard them by simply decrementing the length of the array.</p>
+<p>There is a runtime component to this too. Local variables occupy slots on the stack. When a local variable goes out of scope, that slot is no longer needed and should be freed. So, for each variable that we discard, we also emit an <code>OP_POP</code> &lt;span name=&quot;pop&quot;&gt;instruction&lt;/span&gt; to pop it from the stack.</p>
+<p>&lt;aside name=&quot;pop&quot;&gt;</p>
+<p>When multiple local variables go out of scope at once, you get a series of <code>OP_POP</code> instructions that get interpreted one at a time. A simple optimization you could add to your Lox implementation is a specialized <code>OP_POPN</code> instruction that takes an operand for the number of slots to pop and pops them all at once.</p>
+<p>&lt;/aside&gt;</p>
+<h2>Using Locals</h2>
+<p>We can now compile and execute local variable declarations. At runtime, their values are sitting where they should be on the stack. Let&#x27;s start using them. We&#x27;ll do both variable access and assignment at the same time since they touch the same functions in the compiler.</p>
+<p>We already have code for getting and setting global variables, and -- like good little software engineers -- we want to reuse as much of that existing code as we can. Something like this:</p>
+<p>^code named-local (1 before, 2 after)</p>
+<p>Instead of hardcoding the bytecode instructions emitted for variable access and assignment, we use a couple of C variables. First, we try to find a local variable with the given name. If we find one, we use the instructions for working with locals. Otherwise, we assume it&#x27;s a global variable and use the existing bytecode instructions for globals.</p>
+<p>A little further down, we use those variables to emit the right instructions. For assignment:</p>
+<p>^code emit-set (2 before, 1 after)</p>
+<p>And for access:</p>
+<p>^code emit-get (2 before, 1 after)</p>
+<p>The real heart of this chapter, the part where we resolve a local variable, is here:</p>
+<p>^code resolve-local</p>
+<p>For all that, it&#x27;s straightforward. We walk the list of locals that are currently in scope. If one has the same name as the identifier token, the identifier must refer to that variable. We&#x27;ve found it! We walk the array backward so that we find the <em>last</em> declared variable with the identifier. That ensures that inner local variables correctly shadow locals with the same name in surrounding scopes.</p>
+<p>At runtime, we load and store locals using the stack slot index, so that&#x27;s what the compiler needs to calculate after it resolves the variable. Whenever a variable is declared, we append it to the locals array in Compiler. That means the first local variable is at index zero, the next one is at index one, and so on. In other words, the locals array in the compiler has the <em>exact</em> same layout as the VM&#x27;s stack will have at runtime. The variable&#x27;s index in the locals array is the same as its stack slot. How convenient!</p>
+<p>If we make it through the whole array without finding a variable with the given name, it must not be a local. In that case, we return <code>-1</code> to signal that it wasn&#x27;t found and should be assumed to be a global variable instead.</p>
+<h3>Interpreting local variables</h3>
+<p>Our compiler is emitting two new instructions, so let&#x27;s get them working. First is loading a local variable:</p>
+<p>^code get-local-op (1 before, 1 after)</p>
+<p>And its implementation:</p>
+<p>^code interpret-get-local (1 before, 1 after)</p>
+<p>It takes a single-byte operand for the stack slot where the local lives. It loads the value from that index and then pushes it on top of the stack where later instructions can find it.</p>
+<p>&lt;aside name=&quot;slot&quot;&gt;</p>
+<p>It seems redundant to push the local&#x27;s value onto the stack since it&#x27;s already on the stack lower down somewhere. The problem is that the other bytecode instructions only look for data at the <em>top</em> of the stack. This is the core aspect that makes our bytecode instruction set <em>stack</em>-based. [Register-based][reg</p>
+<p>] bytecode instruction sets avoid this stack juggling at the cost of having larger instructions with more operands.</p>
+<p>[reg]: a-virtual-machine.html#design-note</p>
+<p>&lt;/aside&gt;</p>
+<p>Next is assignment:</p>
+<p>^code set-local-op (1 before, 1 after)</p>
+<p>You can probably predict the implementation.</p>
+<p>^code interpret-set-local (1 before, 1 after)</p>
+<p>It takes the assigned value from the top of the stack and stores it in the stack slot corresponding to the local variable. Note that it doesn&#x27;t pop the value from the stack. Remember, assignment is an expression, and every expression produces a value. The value of an assignment expression is the assigned value itself, so the VM just leaves the value on the stack.</p>
+<p>Our disassembler is incomplete without support for these two new instructions.</p>
+<p>^code disassemble-local (1 before, 1 after)</p>
+<p>The compiler compiles local variables to direct slot access. The local variable&#x27;s name never leaves the compiler to make it into the chunk at all. That&#x27;s great for performance, but not so great for introspection. When we disassemble these instructions, we can&#x27;t show the variable&#x27;s name like we could with globals. Instead, we just show the slot number.</p>
+<p>&lt;aside name=&quot;debug&quot;&gt;</p>
+<p>Erasing local variable names in the compiler is a real issue if we ever want to implement a debugger for our VM. When users step through code, they expect to see the values of local variables organized by their names. To support that, we&#x27;d need to output some additional information that tracks the name of each local variable at each stack slot.</p>
+<p>&lt;/aside&gt;</p>
+<p>^code byte-instruction</p>
+<h3>Another scope edge case</h3>
+<p>We already sunk some time into handling a couple of weird edge cases around scopes. We made sure shadowing works correctly. We report an error if two variables in the same local scope have the same name. For reasons that aren&#x27;t entirely clear to me, variable scoping seems to have a lot of these wrinkles. I&#x27;ve never seen a language where it feels completely &lt;span name=&quot;elegant&quot;&gt;elegant&lt;/span&gt;.</p>
+<p>&lt;aside name=&quot;elegant&quot;&gt;</p>
+<p>No, not even Scheme.</p>
+<p>&lt;/aside&gt;</p>
+<p>We&#x27;ve got one more edge case to deal with before we end this chapter. Recall this strange beastie we first met in [jlox&#x27;s implementation of variable resolution][shadow</p>
+<p>]:</p>
+<p>[shadow]: resolving-and-binding.html#resolving-variable-declarations</p>
+<pre class="lox"><code>{
+  var a = &quot;outer&quot;;
+  {
+    var a = a;
+  }
+}</code></pre>
+<p>We slayed it then by splitting a variable&#x27;s declaration into two phases, and we&#x27;ll do that again here:</p>
+<p>&lt;img src=&quot;image/local-variables/phases.png&quot; alt=&quot;An example variable declaration marked &#x27;declared uninitialized&#x27; before the variable name and &#x27;ready for use&#x27; after the initializer.&quot; /&gt;</p>
+<p>As soon as the variable declaration begins -- in other words, before its initializer -- the name is declared in the current scope. The variable exists, but in a special &quot;uninitialized&quot; state. Then we compile the initializer. If at any point in that expression we resolve an identifier that points back to this variable, we&#x27;ll see that it is not initialized yet and report an error. After we finish compiling the initializer, we mark the variable as initialized and ready for use.</p>
+<p>To implement this, when we declare a local, we need to indicate the &quot;uninitialized&quot; state somehow. We could add a new field to Local, but let&#x27;s be a little more parsimonious with memory. Instead, we&#x27;ll set the variable&#x27;s scope depth to a special sentinel value, <code>-1</code>.</p>
+<p>^code declare-undefined (1 before, 1 after)</p>
+<p>Later, once the variable&#x27;s initializer has been compiled, we mark it initialized.</p>
+<p>^code define-local (1 before, 2 after)</p>
+<p>That is implemented like so:</p>
+<p>^code mark-initialized</p>
+<p>So this is <em>really</em> what &quot;declaring&quot; and &quot;defining&quot; a variable means in the compiler. &quot;Declaring&quot; is when the variable is added to the scope, and &quot;defining&quot; is when it becomes available for use.</p>
+<p>When we resolve a reference to a local variable, we check the scope depth to see if it&#x27;s fully defined.</p>
+<p>^code own-initializer-error (1 before, 1 after)</p>
+<p>If the variable has the sentinel depth, it must be a reference to a variable in its own initializer, and we report that as an error.</p>
+<p>That&#x27;s it for this chapter! We added blocks, local variables, and real, honest-to-God lexical scoping. Given that we introduced an entirely different runtime representation for variables, we didn&#x27;t have to write a lot of code. The implementation ended up being pretty clean and efficient.</p>
+<p>You&#x27;ll notice that almost all of the code we wrote is in the compiler. Over in the runtime, it&#x27;s just two little instructions. You&#x27;ll see this as a continuing &lt;span name=&quot;static&quot;&gt;trend&lt;/span&gt; in clox compared to jlox. One of the biggest hammers in the optimizer&#x27;s toolbox is pulling work forward into the compiler so that you don&#x27;t have to do it at runtime. In this chapter, that meant resolving exactly which stack slot every local variable occupies. That way, at runtime, no lookup or resolution needs to happen.</p>
+<p>&lt;aside name=&quot;static&quot;&gt;</p>
+<p>You can look at static types as an extreme example of this trend. A statically typed language takes all of the type analysis and type error handling and sorts it all out during compilation. Then the runtime doesn&#x27;t have to waste any time checking that values have the proper type for their operation. In fact, in some statically typed languages like C, you don&#x27;t even <em>know</em> the type at runtime. The compiler completely erases any representation of a value&#x27;s type leaving just the bare bits.</p>
+<p>&lt;/aside&gt;</p>
+<p>&lt;div class=&quot;challenges&quot;&gt;</p>
+<h2>Challenges</h2>
+<p>1.  Our simple local array makes it easy to calculate the stack slot of each     local variable. But it means that when the compiler resolves a reference to     a variable, we have to do a linear scan through the array.</p>
+<p>    Come up with something more efficient. Do you think the additional     complexity is worth it?</p>
+<p>1.  How do other languages handle code like this:</p>
+<p>    <code></code>`lox     var a = a;     <code></code>`</p>
+<p>    What would you do if it was your language? Why?</p>
+<p>1.  Many languages make a distinction between variables that can be reassigned     and those that can&#x27;t. In Java, the <code>final</code> modifier prevents you from     assigning to a variable. In JavaScript, a variable declared with <code>let</code> can     be assigned, but one declared using <code>const</code> can&#x27;t. Swift treats <code>let</code> as     single-assignment and uses <code>var</code> for assignable variables. Scala and Kotlin     use <code>val</code> and <code>var</code>.</p>
+<p>    Pick a keyword for a single-assignment variable form to add to Lox. Justify     your choice, then implement it. An attempt to assign to a variable declared     using your new keyword should cause a compile error.</p>
+<p>1.  Extend clox to allow more than 256 local variables to be in scope at a time.</p>
+<p>&lt;/div&gt; </p>

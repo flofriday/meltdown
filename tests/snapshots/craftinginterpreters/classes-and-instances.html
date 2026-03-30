@@ -1,0 +1,206 @@
+<blockquote> Caring too much for objects can destroy you. Only -- if you care for a thing</blockquote><blockquote> enough, it takes on a life of its own, doesn&#x27;t it? And isn’t the whole point</blockquote><blockquote> of things -- beautiful things -- that they connect you to some larger beauty?</blockquote><blockquote></blockquote><blockquote> &lt;cite&gt;Donna Tartt, &lt;em&gt;The Goldfinch&lt;/em&gt;&lt;/cite&gt;</blockquote><p>The last area left to implement in clox is object-oriented programming. &lt;span name=&quot;oop&quot;&gt;OOP&lt;/span&gt; is a bundle of intertwined features: classes, instances, fields, methods, initializers, and inheritance. Using relatively high-level Java, we packed all that into two chapters. Now that we&#x27;re coding in C, which feels like building a model of the Eiffel tower out of toothpicks, we&#x27;ll devote three chapters to covering the same territory. This makes for a leisurely stroll through the implementation. After strenuous chapters like [closures][</p>
+<p>] and the [garbage collector][</p>
+<p>], you have earned a rest. In fact, the book should be easy from here on out.</p>
+<p>&lt;aside name=&quot;oop&quot;&gt;</p>
+<p>People who have strong opinions about object-oriented programming -- read &quot;everyone&quot; -- tend to assume OOP means some very specific list of language features, but really there&#x27;s a whole space to explore, and each language has its own ingredients and recipes.</p>
+<p>Self has objects but no classes. CLOS has methods but doesn&#x27;t attach them to specific classes. C++ initially had no runtime polymorphism -- no virtual methods. Python has multiple inheritance, but Java does not. Ruby attaches methods to classes, but you can also define methods on a single object.</p>
+<p>&lt;/aside&gt;</p>
+<p>In this chapter, we cover the first three features: classes, instances, and fields. This is the stateful side of object orientation. Then in the next two chapters, we will hang behavior and code reuse off of those objects.</p>
+<p>[closures]: closures.html [garbage collector</p>
+<p>]: garbage-collection.html</p>
+<h2>Class Objects</h2>
+<p>In a class-based object-oriented language, everything begins with classes. They define what sorts of objects exist in the program and are the factories used to produce new instances. Going bottom-up, we&#x27;ll start with their runtime representation and then hook that into the language.</p>
+<p>By this point, we&#x27;re well-acquainted with the process of adding a new object type to the VM. We start with a struct.</p>
+<p>^code obj-class (1 before, 2 after)</p>
+<p>After the Obj header, we store the class&#x27;s name. This isn&#x27;t strictly needed for the user&#x27;s program, but it lets us show the name at runtime for things like stack traces.</p>
+<p>The new type needs a corresponding case in the ObjType enum.</p>
+<p>^code obj-type-class (1 before, 1 after)</p>
+<p>And that type gets a corresponding pair of macros. First, for testing an object&#x27;s type:</p>
+<p>^code is-class (2 before, 1 after)</p>
+<p>And then for casting a Value to an ObjClass pointer:</p>
+<p>^code as-class (2 before, 1 after)</p>
+<p>The VM creates new class objects using this function:</p>
+<p>^code new-class-h (2 before, 1 after)</p>
+<p>The implementation lives over here:</p>
+<p>^code new-class</p>
+<p>Pretty much all boilerplate. It takes in the class&#x27;s name as a string and stores it. Every time the user declares a new class, the VM will create a new one of these ObjClass structs to represent it.</p>
+<p>&lt;aside name=&quot;klass&quot;&gt;</p>
+<p>&lt;img src=&quot;image/classes-and-instances/klass.png&quot; alt=&quot;&#x27;Klass&#x27; in a zany kidz font.&quot;/&gt;</p>
+<p>I named the variable &quot;klass&quot; not just to give the VM a zany preschool &quot;Kidz Korner&quot; feel. It makes it easier to get clox compiling as C++ where &quot;class&quot; is a reserved word.</p>
+<p>&lt;/aside&gt;</p>
+<p>When the VM no longer needs a class, it frees it like so:</p>
+<p>^code free-class (1 before, 1 after)</p>
+<p>&lt;aside name=&quot;braces&quot;&gt;</p>
+<p>The braces here are pointless now, but will be useful in the next chapter when we add some more code to the switch case.</p>
+<p>&lt;/aside&gt;</p>
+<p>We have a memory manager now, so we also need to support tracing through class objects.</p>
+<p>^code blacken-class (1 before, 1 after)</p>
+<p>When the GC reaches a class object, it marks the class&#x27;s name to keep that string alive too.</p>
+<p>The last operation the VM can perform on a class is printing it.</p>
+<p>^code print-class (1 before, 1 after)</p>
+<p>A class simply says its own name.</p>
+<h2>Class Declarations</h2>
+<p>Runtime representation in hand, we are ready to add support for classes to the language. Next, we move into the parser.</p>
+<p>^code match-class (1 before, 1 after)</p>
+<p>Class declarations are statements, and the parser recognizes one by the leading <code>class</code> keyword. The rest of the compilation happens over here:</p>
+<p>^code class-declaration</p>
+<p>Immediately after the <code>class</code> keyword is the class&#x27;s name. We take that identifier and add it to the surrounding function&#x27;s constant table as a string. As you just saw, printing a class shows its name, so the compiler needs to stuff the name string somewhere that the runtime can find. The constant table is the way to do that.</p>
+<p>The class&#x27;s &lt;span name=&quot;variable&quot;&gt;name&lt;/span&gt; is also used to bind the class object to a variable of the same name. So we declare a variable with that identifier right after consuming its token.</p>
+<p>&lt;aside name=&quot;variable&quot;&gt;</p>
+<p>We could have made class declarations be <em>expressions</em> instead of statements -- they are essentially a literal that produces a value after all. Then users would have to explicitly bind the class to a variable themselves like:</p>
+<pre class="lox"><code>var Pie = class {}</code></pre>
+<p>Sort of like lambda functions but for classes. But since we generally want classes to be named anyway, it makes sense to treat them as declarations.</p>
+<p>&lt;/aside&gt;</p>
+<p>Next, we emit a new instruction to actually create the class object at runtime. That instruction takes the constant table index of the class&#x27;s name as an operand.</p>
+<p>After that, but before compiling the body of the class, we define the variable for the class&#x27;s name. <em>Declaring</em> the variable adds it to the scope, but recall from [a previous chapter][scope</p>
+<p>] that we can&#x27;t <em>use</em> the variable until it&#x27;s <em>defined</em>. For classes, we define the variable before the body. That way, users can refer to the containing class inside the bodies of its own methods. That&#x27;s useful for things like factory methods that produce new instances of the class.</p>
+<p>[scope]: local-variables.html#another-scope-edge-case</p>
+<p>Finally, we compile the body. We don&#x27;t have methods yet, so right now it&#x27;s simply an empty pair of braces. Lox doesn&#x27;t require fields to be declared in the class, so we&#x27;re done with the body -- and the parser -- for now.</p>
+<p>The compiler is emitting a new instruction, so let&#x27;s define that.</p>
+<p>^code class-op (1 before, 1 after)</p>
+<p>And add it to the disassembler:</p>
+<p>^code disassemble-class (2 before, 1 after)</p>
+<p>For such a large-seeming feature, the interpreter support is minimal.</p>
+<p>^code interpret-class (2 before, 1 after)</p>
+<p>We load the string for the class&#x27;s name from the constant table and pass that to <code>newClass()</code>. That creates a new class object with the given name. We push that onto the stack and we&#x27;re good. If the class is bound to a global variable, then the compiler&#x27;s call to <code>defineVariable()</code> will emit code to store that object from the stack into the global variable table. Otherwise, it&#x27;s right where it needs to be on the stack for a new &lt;span name=&quot;local&quot;&gt;local&lt;/span&gt; variable.</p>
+<p>&lt;aside name=&quot;local&quot;&gt;</p>
+<p>&quot;Local&quot; classes -- classes declared inside the body of a function or block, are an unusual concept. Many languages don&#x27;t allow them at all. But since Lox is a dynamically typed scripting language, it treats the top level of a program and the bodies of functions and blocks uniformly. Classes are just another kind of declaration, and since you can declare variables and functions inside blocks, you can declare classes in there too.</p>
+<p>&lt;/aside&gt;</p>
+<p>There you have it, our VM supports classes now. You can run this:</p>
+<pre class="lox"><code>class Brioche {}
+print Brioche;</code></pre>
+<p>Unfortunately, printing is about <em>all</em> you can do with classes, so next is making them more useful.</p>
+<h2>Instances of Classes</h2>
+<p>Classes serve two main purposes in a language:</p>
+<ul>
+<li>  <strong>They are how you create new instances.</strong> Sometimes this involves a <code>new</code></li>
+</ul>
+<p>    keyword, other times it&#x27;s a method call on the class object, but you usually     mention the class by name <em>somehow</em> to get a new instance.</p>
+<ul>
+<li>  <strong>They contain methods.</strong> These define how all instances of the class</li>
+</ul>
+<p>    behave.</p>
+<p>We won&#x27;t get to methods until the next chapter, so for now we will only worry about the first part. Before classes can create instances, we need a representation for them.</p>
+<p>^code obj-instance (1 before, 2 after)</p>
+<p>Instances know their class -- each instance has a pointer to the class that it is an instance of.  We won&#x27;t use this much in this chapter, but it will become critical when we add methods.</p>
+<p>More important to this chapter is how instances store their state. Lox lets users freely add fields to an instance at runtime. This means we need a storage mechanism that can grow. We could use a dynamic array, but we also want to look up fields by name as quickly as possible. There&#x27;s a data structure that&#x27;s just perfect for quickly accessing a set of values by name and -- even more conveniently -- we&#x27;ve already implemented it. Each instance stores its fields using a hash table.</p>
+<p>&lt;aside name=&quot;fields&quot;&gt;</p>
+<p>Being able to freely add fields to an object at runtime is a big practical difference between most dynamic and static languages. Statically typed languages usually require fields to be explicitly declared. This way, the compiler knows exactly what fields each instance has. It can use that to determine the precise amount of memory needed for each instance and the offsets in that memory where each field can be found.</p>
+<p>In Lox and other dynamic languages, accessing a field is usually a hash table lookup. Constant time, but still pretty heavyweight. In a language like C++, accessing a field is as fast as offsetting a pointer by an integer constant.</p>
+<p>&lt;/aside&gt;</p>
+<p>We only need to add an include, and we&#x27;ve got it.</p>
+<p>^code object-include-table (1 before, 1 after)</p>
+<p>This new struct gets a new object type.</p>
+<p>^code obj-type-instance (1 before, 1 after)</p>
+<p>I want to slow down a bit here because the Lox <em>language&#x27;s</em> notion of &quot;type&quot; and the VM <em>implementation&#x27;s</em> notion of &quot;type&quot; brush against each other in ways that can be confusing. Inside the C code that makes clox, there are a number of different types of Obj -- ObjString, ObjClosure, etc. Each has its own internal representation and semantics.</p>
+<p>In the Lox <em>language</em>, users can define their own classes -- say Cake and Pie -- and then create instances of those classes. From the user&#x27;s perspective, an instance of Cake is a different type of object than an instance of Pie. But, from the VM&#x27;s perspective, every class the user defines is simply another value of type ObjClass. Likewise, each instance in the user&#x27;s program, no matter what class it is an instance of, is an ObjInstance. That one VM object type covers instances of all classes. The two worlds map to each other something like this:</p>
+<p>&lt;img src=&quot;image/classes-and-instances/lox-clox.png&quot; alt=&quot;A set of class declarations and instances, and the runtime representations each maps to.&quot;/&gt;</p>
+<p>Got it? OK, back to the implementation. We also get our usual macros.</p>
+<p>^code is-instance (1 before, 1 after)</p>
+<p>And:</p>
+<p>^code as-instance (1 before, 1 after)</p>
+<p>Since fields are added after the instance is created, the &quot;constructor&quot; function only needs to know the class.</p>
+<p>^code new-instance-h (1 before, 1 after)</p>
+<p>We implement that function here:</p>
+<p>^code new-instance</p>
+<p>We store a reference to the instance&#x27;s class. Then we initialize the field table to an empty hash table. A new baby object is born!</p>
+<p>At the sadder end of the instance&#x27;s lifespan, it gets freed.</p>
+<p>^code free-instance (3 before, 1 after)</p>
+<p>The instance owns its field table so when freeing the instance, we also free the table. We don&#x27;t explicitly free the entries <em>in</em> the table, because there may be other references to those objects. The garbage collector will take care of those for us. Here we free only the entry array of the table itself.</p>
+<p>Speaking of the garbage collector, it needs support for tracing through instances.</p>
+<p>^code blacken-instance (3 before, 1 after)</p>
+<p>If the instance is alive, we need to keep its class around. Also, we need to keep every object referenced by the instance&#x27;s fields. Most live objects that are not roots are reachable because some instance refers to the object in a field. Fortunately, we already have a nice <code>markTable()</code> function to make tracing them easy.</p>
+<p>Less critical but still important is printing.</p>
+<p>^code print-instance (1 before, 1 after)</p>
+<p>&lt;span name=&quot;print&quot;&gt;An&lt;/span&gt; instance prints its name followed by &quot;instance&quot;. (The &quot;instance&quot; part is mainly so that classes and instances don&#x27;t print the same.)</p>
+<p>&lt;aside name=&quot;print&quot;&gt;</p>
+<p>Most object-oriented languages let a class define some sort of <code>toString()</code> method that lets the class specify how its instances are converted to a string and printed. If Lox was less of a toy language, I would want to support that too.</p>
+<p>&lt;/aside&gt;</p>
+<p>The real fun happens over in the interpreter. Lox has no special <code>new</code> keyword. The way to create an instance of a class is to invoke the class itself as if it were a function. The runtime already supports function calls, and it checks the type of object being called to make sure the user doesn&#x27;t try to invoke a number or other invalid type.</p>
+<p>We extend that runtime checking with a new case.</p>
+<p>^code call-class (1 before, 1 after)</p>
+<p>If the value being called -- the object that results when evaluating the expression to the left of the opening parenthesis -- is a class, then we treat it as a constructor call. We &lt;span name=&quot;args&quot;&gt;create&lt;/span&gt; a new instance of the called class and store the result on the stack.</p>
+<p>&lt;aside name=&quot;args&quot;&gt;</p>
+<p>We ignore any arguments passed to the call for now. We&#x27;ll revisit this code in the [next chapter][next</p>
+<p>] when we add support for initializers.</p>
+<p>[next]: methods-and-initializers.html</p>
+<p>&lt;/aside&gt;</p>
+<p>We&#x27;re one step farther. Now we can define classes and create instances of them.</p>
+<pre class="lox"><code>class Brioche {}
+print Brioche();</code></pre>
+<p>Note the parentheses after <code>Brioche</code> on the second line now. This prints &quot;Brioche instance&quot;.</p>
+<h2>Get and Set Expressions</h2>
+<p>Our object representation for instances can already store state, so all that remains is exposing that functionality to the user. Fields are accessed and modified using get and set expressions. Not one to break with tradition, Lox uses the classic &quot;dot&quot; syntax:</p>
+<pre class="lox"><code>eclair.filling = &quot;pastry creme&quot;;
+print eclair.filling;</code></pre>
+<p>The period -- full stop for my English friends -- works &lt;span name=&quot;sort&quot;&gt;sort&lt;/span&gt; of like an infix operator. There is an expression to the left that is evaluated first and produces an instance. After that is the <code>.</code> followed by a field name. Since there is a preceding operand, we hook this into the parse table as an infix expression.</p>
+<p>&lt;aside name=&quot;sort&quot;&gt;</p>
+<p>I say &quot;sort of&quot; because the right-hand side after the <code>.</code> is not an expression, but a single identifier whose semantics are handled by the get or set expression itself. It&#x27;s really closer to a postfix expression.</p>
+<p>&lt;/aside&gt;</p>
+<p>^code table-dot (1 before, 1 after)</p>
+<p>As in other languages, the <code>.</code> operator binds tightly, with precedence as high as the parentheses in a function call. After the parser consumes the dot token, it dispatches to a new parse function.</p>
+<p>^code compile-dot</p>
+<p>The parser expects to find a &lt;span name=&quot;prop&quot;&gt;property&lt;/span&gt; name immediately after the dot. We load that token&#x27;s lexeme into the constant table as a string so that the name is available at runtime.</p>
+<p>&lt;aside name=&quot;prop&quot;&gt;</p>
+<p>The compiler uses &quot;property&quot; instead of &quot;field&quot; here because, remember, Lox also lets you use dot syntax to access a method without calling it. &quot;Property&quot; is the general term we use to refer to any named entity you can access on an instance. Fields are the subset of properties that are backed by the instance&#x27;s state.</p>
+<p>&lt;/aside&gt;</p>
+<p>We have two new expression forms -- getters and setters -- that this one function handles. If we see an equals sign after the field name, it must be a set expression that is assigning to a field. But we don&#x27;t <em>always</em> allow an equals sign after the field to be compiled. Consider:</p>
+<pre class="lox"><code>a + b.c = 3</code></pre>
+<p>This is syntactically invalid according to Lox&#x27;s grammar, which means our Lox implementation is obligated to detect and report the error. If <code>dot()</code> silently parsed the <code>= 3</code> part, we would incorrectly interpret the code as if the user had written:</p>
+<pre class="lox"><code>a + (b.c = 3)</code></pre>
+<p>The problem is that the <code>=</code> side of a set expression has much lower precedence than the <code>.</code> part. The parser may call <code>dot()</code> in a context that is too high precedence to permit a setter to appear. To avoid incorrectly allowing that, we parse and compile the equals part only when <code>canAssign</code> is true. If an equals token appears when <code>canAssign</code> is false, <code>dot()</code> leaves it alone and returns. In that case, the compiler will eventually unwind up to <code>parsePrecedence()</code>, which stops at the unexpected <code>=</code> still sitting as the next token and reports an error.</p>
+<p>If we find an <code>=</code> in a context where it <em>is</em> allowed, then we compile the expression that follows. After that, we emit a new &lt;span name=&quot;set&quot;&gt;<code>OP_SET_PROPERTY</code>&lt;/span&gt; instruction. That takes a single operand for the index of the property name in the constant table. If we didn&#x27;t compile a set expression, we assume it&#x27;s a getter and emit an <code>OP_GET_PROPERTY</code> instruction, which also takes an operand for the property name.</p>
+<p>&lt;aside name=&quot;set&quot;&gt;</p>
+<p>You can&#x27;t <em>set</em> a non-field property, so I suppose that instruction could have been <code>OP_SET_FIELD</code>, but I thought it looked nicer to be consistent with the get instruction.</p>
+<p>&lt;/aside&gt;</p>
+<p>Now is a good time to define these two new instructions.</p>
+<p>^code property-ops (1 before, 1 after)</p>
+<p>And add support for disassembling them:</p>
+<p>^code disassemble-property-ops (1 before, 1 after)</p>
+<h3>Interpreting getter and setter expressions</h3>
+<p>Sliding over to the runtime, we&#x27;ll start with get expressions since those are a little simpler.</p>
+<p>^code interpret-get-property (1 before, 1 after)</p>
+<p>When the interpreter reaches this instruction, the expression to the left of the dot has already been executed and the resulting instance is on top of the stack. We read the field name from the constant pool and look it up in the instance&#x27;s field table. If the hash table contains an entry with that name, we pop the instance and push the entry&#x27;s value as the result.</p>
+<p>Of course, the field might not exist. In Lox, we&#x27;ve defined that to be a runtime error. So we add a check for that and abort if it happens.</p>
+<p>^code get-undefined (3 before, 2 after)</p>
+<p>&lt;span name=&quot;field&quot;&gt;There&lt;/span&gt; is another failure mode to handle which you&#x27;ve probably noticed. The above code assumes the expression to the left of the dot did evaluate to an ObjInstance. But there&#x27;s nothing preventing a user from writing this:</p>
+<pre class="lox"><code>var obj = &quot;not an instance&quot;;
+print obj.field;</code></pre>
+<p>The user&#x27;s program is wrong, but the VM still has to handle it with some grace. Right now, it will misinterpret the bits of the ObjString as an ObjInstance and, I don&#x27;t know, catch on fire or something definitely not graceful.</p>
+<p>In Lox, only instances are allowed to have fields. You can&#x27;t stuff a field onto a string or number. So we need to check that the value is an instance before accessing any fields on it.</p>
+<p>&lt;aside name=&quot;field&quot;&gt;</p>
+<p>Lox <em>could</em> support adding fields to values of other types. It&#x27;s our language and we can do what we want. But it&#x27;s likely a bad idea. It significantly complicates the implementation in ways that hurt performance -- for example, string interning gets a lot harder.</p>
+<p>Also, it raises gnarly semantic questions around the equality and identity of values. If I attach a field to the number <code>3</code>, does the result of <code>1 + 2</code> have that field as well? If so, how does the implementation track that? If not, are those two resulting &quot;threes&quot; still considered equal?</p>
+<p>&lt;/aside&gt;</p>
+<p>^code get-not-instance (1 before, 1 after)</p>
+<p>If the value on the stack isn&#x27;t an instance, we report a runtime error and safely exit.</p>
+<p>Of course, get expressions are not very useful when no instances have any fields. For that we need setters.</p>
+<p>^code interpret-set-property (2 before, 1 after)</p>
+<p>This is a little more complex than <code>OP_GET_PROPERTY</code>. When this executes, the top of the stack has the instance whose field is being set and above that, the value to be stored. Like before, we read the instruction&#x27;s operand and find the field name string. Using that, we store the value on top of the stack into the instance&#x27;s field table.</p>
+<p>After that is a little &lt;span name=&quot;stack&quot;&gt;stack&lt;/span&gt; juggling. We pop the stored value off, then pop the instance, and finally push the value back on. In other words, we remove the <em>second</em> element from the stack while leaving the top alone. A setter is itself an expression whose result is the assigned value, so we need to leave that value on the stack. Here&#x27;s what I mean:</p>
+<p>&lt;aside name=&quot;stack&quot;&gt;</p>
+<p>The stack operations go like this:</p>
+<p>&lt;img src=&quot;image/classes-and-instances/stack.png&quot; alt=&quot;Popping two values and then pushing the first value back on the stack.&quot;/&gt;</p>
+<p>&lt;/aside&gt;</p>
+<pre class="lox"><code>class Toast {}
+var toast = Toast();
+print toast.jam = &quot;grape&quot;; // Prints &quot;grape&quot;.</code></pre>
+<p>Unlike when reading a field, we don&#x27;t need to worry about the hash table not containing the field. A setter implicitly creates the field if needed. We do need to handle the user incorrectly trying to store a field on a value that isn&#x27;t an instance.</p>
+<p>^code set-not-instance (1 before, 1 after)</p>
+<p>Exactly like with get expressions, we check the value&#x27;s type and report a runtime error if it&#x27;s invalid. And, with that, the stateful side of Lox&#x27;s support for object-oriented programming is in place. Give it a try:</p>
+<pre class="lox"><code>class Pair {}
+
+var pair = Pair();
+pair.first = 1;
+pair.second = 2;
+print pair.first + pair.second; // 3.</code></pre>
+<p>This doesn&#x27;t really feel very <em>object</em>-oriented. It&#x27;s more like a strange, dynamically typed variant of C where objects are loose struct-like bags of data. Sort of a dynamic procedural language. But this is a big step in expressiveness. Our Lox implementation now lets users freely aggregate data into bigger units. In the next chapter, we will breathe life into those inert blobs.</p>
+<p>&lt;div class=&quot;challenges&quot;&gt;</p>
+<h2>Challenges</h2>
+<p>1.  Trying to access a non-existent field on an object immediately aborts the     entire VM. The user has no way to recover from this runtime error, nor is     there any way to see if a field exists <em>before</em> trying to access it. It&#x27;s up     to the user to ensure on their own that only valid fields are read.</p>
+<p>    How do other dynamically typed languages handle missing fields? What do you     think Lox should do? Implement your solution.</p>
+<p>2.  Fields are accessed at runtime by their <em>string</em> name. But that name must     always appear directly in the source code as an <em>identifier token</em>. A user     program cannot imperatively build a string value and then use that as the     name of a field. Do you think they should be able to? Devise a language     feature that enables that and implement it.</p>
+<p>3.  Conversely, Lox offers no way to <em>remove</em> a field from an instance. You can     set a field&#x27;s value to <code>nil</code>, but the entry in the hash table is still     there. How do other languages handle this? Choose and implement a strategy     for Lox.</p>
+<p>4.  Because fields are accessed by name at runtime, working with instance state     is slow. It&#x27;s technically a constant-time operation -- thanks, hash tables     -- but the constant factors are relatively large. This is a major component     of why dynamic languages are slower than statically typed ones.</p>
+<p>    How do sophisticated implementations of dynamically typed languages cope     with and optimize this?</p>
+<p>&lt;/div&gt; </p>

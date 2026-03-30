@@ -1,0 +1,283 @@
+<blockquote> Literature is idiosyncratic arrangements in horizontal lines in only</blockquote><blockquote> twenty-six phonetic symbols, ten Arabic numbers, and about eight punctuation</blockquote><blockquote> marks.</blockquote><blockquote></blockquote><blockquote> &lt;cite&gt;Kurt Vonnegut, &lt;em&gt;Like Shaking Hands With God: A Conversation about Writing&lt;/em&gt;&lt;/cite&gt;</blockquote><p>Our second interpreter, clox, has three phases -- scanner, compiler, and virtual machine. A data structure joins each pair of phases. Tokens flow from scanner to compiler, and chunks of bytecode from compiler to VM. We began our implementation near the end with [chunks][</p>
+<p>] and the [VM][</p>
+<p>]. Now, we&#x27;re going to hop back to the beginning and build a scanner that makes tokens. In the [next chapter][</p>
+<p>], we&#x27;ll tie the two ends together with our bytecode compiler.</p>
+<p>[chunks]: chunks-of-bytecode.html [vm</p>
+<p>]: a-virtual-machine.html [next chapter]: compiling-expressions.html</p>
+<p>&lt;img src=&quot;image/scanning-on-demand/pipeline.png&quot; alt=&quot;Source code &amp;rarr; scanner &amp;rarr; tokens &amp;rarr; compiler &amp;rarr; bytecode chunk &amp;rarr; VM.&quot; /&gt;</p>
+<p>I&#x27;ll admit, this is not the most exciting chapter in the book. With two implementations of the same language, there&#x27;s bound to be some redundancy. I did sneak in a few interesting differences compared to jlox&#x27;s scanner. Read on to see what they are.</p>
+<h2>Spinning Up the Interpreter</h2>
+<p>Now that we&#x27;re building the front end, we can get clox running like a real interpreter. No more hand-authored chunks of bytecode. It&#x27;s time for a REPL and script loading. Tear out most of the code in <code>main()</code> and replace it with:</p>
+<p>^code args (3 before, 2 after)</p>
+<p>If you pass &lt;span name=&quot;args&quot;&gt;no arguments&lt;/span&gt; to the executable, you are dropped into the REPL. A single command line argument is understood to be the path to a script to run.</p>
+<p>&lt;aside name=&quot;args&quot;&gt;</p>
+<p>The code tests for one and two arguments, not zero and one, because the first argument in <code>argv</code> is always the name of the executable being run.</p>
+<p>&lt;/aside&gt;</p>
+<p>We&#x27;ll need a few system headers, so let&#x27;s get them all out of the way.</p>
+<p>^code main-includes (1 after)</p>
+<p>Next, we get the REPL up and REPL-ing.</p>
+<p>^code repl (1 before)</p>
+<p>A quality REPL handles input that spans multiple lines gracefully and doesn&#x27;t have a hardcoded line length limit. This REPL here is a little more, ahem, austere, but it&#x27;s fine for our purposes.</p>
+<p>The real work happens in <code>interpret()</code>. We&#x27;ll get to that soon, but first let&#x27;s take care of loading scripts.</p>
+<p>^code run-file</p>
+<p>We read the file and execute the resulting string of Lox source code. Then, based on the result of that, we set the exit code appropriately because we&#x27;re scrupulous tool builders and care about little details like that.</p>
+<p>We also need to free the source code string because <code>readFile()</code> dynamically allocates it and passes ownership to its caller. That function looks like this:</p>
+<p>&lt;aside name=&quot;owner&quot;&gt;</p>
+<p>C asks us not just to manage memory explicitly, but <em>mentally</em>. We programmers have to remember the ownership rules and hand-implement them throughout the program. Java just does it for us. C++ gives us tools to encode the policy directly so that the compiler validates it for us.</p>
+<p>I like C&#x27;s simplicity, but we pay a real price for it -- the language requires us to be more conscientious.</p>
+<p>&lt;/aside&gt;</p>
+<p>^code read-file</p>
+<p>Like a lot of C code, it takes more effort than it seems like it should, especially for a language expressly designed for operating systems. The difficult part is that we want to allocate a big enough string to read the whole file, but we don&#x27;t know how big the file is until we&#x27;ve read it.</p>
+<p>The code here is the classic trick to solve that. We open the file, but before reading it, we seek to the very end using <code>fseek()</code>. Then we call <code>ftell()</code> which tells us how many bytes we are from the start of the file. Since we seeked (sought?) to the end, that&#x27;s the size. We rewind back to the beginning, allocate a string of that &lt;span name=&quot;one&quot;&gt;size&lt;/span&gt;, and read the whole file in a single batch.</p>
+<p>&lt;aside name=&quot;one&quot;&gt;</p>
+<p>Well, that size <em>plus one</em>. Always gotta remember to make room for the null byte.</p>
+<p>&lt;/aside&gt;</p>
+<p>So we&#x27;re done, right? Not quite. These function calls, like most calls in the C standard library, can fail. If this were Java, the failures would be thrown as exceptions and automatically unwind the stack so we wouldn&#x27;t <em>really</em> need to handle them. In C, if we don&#x27;t check for them, they silently get ignored.</p>
+<p>This isn&#x27;t really a book on good C programming practice, but I hate to encourage bad style, so let&#x27;s go ahead and handle the errors. It&#x27;s good for us, like eating our vegetables or flossing.</p>
+<p>Fortunately, we don&#x27;t need to do anything particularly clever if a failure occurs. If we can&#x27;t correctly read the user&#x27;s script, all we can really do is tell the user and exit the interpreter gracefully. First of all, we might fail to open the file.</p>
+<p>^code no-file (1 before, 2 after)</p>
+<p>This can happen if the file doesn&#x27;t exist or the user doesn&#x27;t have access to it. It&#x27;s pretty common -- people mistype paths all the time.</p>
+<p>This failure is much rarer:</p>
+<p>^code no-buffer (1 before, 1 after)</p>
+<p>If we can&#x27;t even allocate enough memory to read the Lox script, the user&#x27;s probably got bigger problems to worry about, but we should do our best to at least let them know.</p>
+<p>Finally, the read itself may fail.</p>
+<p>^code no-read (1 before, 1 after)</p>
+<p>This is also unlikely. Actually, the &lt;span name=&quot;printf&quot;&gt; calls&lt;/span&gt; to <code>fseek()</code>, <code>ftell()</code>, and <code>rewind()</code> could theoretically fail too, but let&#x27;s not go too far off in the weeds, shall we?</p>
+<p>&lt;aside name=&quot;printf&quot;&gt;</p>
+<p>Even good old <code>printf()</code> can fail. Yup. How many times have you handled <em>that</em> error?</p>
+<p>&lt;/aside&gt;</p>
+<h3>Opening the compilation pipeline</h3>
+<p>We&#x27;ve got ourselves a string of Lox source code, so now we&#x27;re ready to set up a pipeline to scan, compile, and execute it. It&#x27;s driven by <code>interpret()</code>. Right now, that function runs our old hardcoded test chunk. Let&#x27;s change it to something closer to its final incarnation.</p>
+<p>^code vm-interpret-h (1 before, 1 after)</p>
+<p>Where before we passed in a Chunk, now we pass in the string of source code. Here&#x27;s the new implementation:</p>
+<p>^code vm-interpret-c (1 after)</p>
+<p>We won&#x27;t build the actual <em>compiler</em> yet in this chapter, but we can start laying out its structure. It lives in a new module.</p>
+<p>^code vm-include-compiler (1 before, 1 after)</p>
+<p>For now, the one function in it is declared like so:</p>
+<p>^code compiler-h</p>
+<p>That signature will change, but it gets us going.</p>
+<p>The first phase of compilation is scanning -- the thing we&#x27;re doing in this chapter -- so right now all the compiler does is set that up.</p>
+<p>^code compiler-c</p>
+<p>This will also grow in later chapters, naturally.</p>
+<h3>The scanner scans</h3>
+<p>There are still a few more feet of scaffolding to stand up before we can start writing useful code. First, a new header:</p>
+<p>^code scanner-h</p>
+<p>And its corresponding implementation:</p>
+<p>^code scanner-c</p>
+<p>As our scanner chews through the user&#x27;s source code, it tracks how far it&#x27;s gone. Like we did with the VM, we wrap that state in a struct and then create a single top-level module variable of that type so we don&#x27;t have to pass it around all of the various functions.</p>
+<p>There are surprisingly few fields. The <code>start</code> pointer marks the beginning of the current lexeme being scanned, and <code>current</code> points to the current character being looked at.</p>
+<p>&lt;span name=&quot;fields&quot;&gt;&lt;/span&gt;</p>
+<p>&lt;img src=&quot;image/scanning-on-demand/fields.png&quot; alt=&quot;The start and current fields pointing at &#x27;print bacon;&#x27;. Start points at &#x27;b&#x27; and current points at &#x27;o&#x27;.&quot; /&gt;</p>
+<p>&lt;aside name=&quot;fields&quot;&gt;</p>
+<p>Here, we are in the middle of scanning the identifier <code>bacon</code>. The current character is <code>o</code> and the character we most recently consumed is <code>c</code>.</p>
+<p>&lt;/aside&gt;</p>
+<p>We have a <code>line</code> field to track what line the current lexeme is on for error reporting. That&#x27;s it! We don&#x27;t even keep a pointer to the beginning of the source code string. The scanner works its way through the code once and is done after that.</p>
+<p>Since we have some state, we should initialize it.</p>
+<p>^code init-scanner</p>
+<p>We start at the very first character on the very first line, like a runner crouched at the starting line.</p>
+<h2>A Token at a Time</h2>
+<p>In jlox, when the starting gun went off, the scanner raced ahead and eagerly scanned the whole program, returning a list of tokens. This would be a challenge in clox. We&#x27;d need some sort of growable array or list to store the tokens in. We&#x27;d need to manage allocating and freeing the tokens, and the collection itself. That&#x27;s a lot of code, and a lot of memory churn.</p>
+<p>At any point in time, the compiler needs only one or two tokens -- remember our grammar requires only a single token of lookahead -- so we don&#x27;t need to keep them <em>all</em> around at the same time. Instead, the simplest solution is to not scan a token until the compiler needs one. When the scanner provides one, it returns the token by value. It doesn&#x27;t need to dynamically allocate anything -- it can just pass tokens around on the C stack.</p>
+<p>Unfortunately, we don&#x27;t have a compiler yet that can ask the scanner for tokens, so the scanner will just sit there doing nothing. To kick it into action, we&#x27;ll write some temporary code to drive it.</p>
+<p>^code dump-tokens (1 before, 1 after)</p>
+<p>&lt;aside name=&quot;format&quot;&gt;</p>
+<p>That <code>%.*s</code> in the format string is a neat feature. Usually, you set the output precision -- the number of characters to show -- by placing a number inside the format string. Using <code>*</code> instead lets you pass the precision as an argument. So that <code>printf()</code> call prints the first <code>token.length</code> characters of the string at <code>token.start</code>. We need to limit the length like that because the lexeme points into the original source string and doesn&#x27;t have a terminator at the end.</p>
+<p>&lt;/aside&gt;</p>
+<p>This loops indefinitely. Each turn through the loop, it scans one token and prints it. When it reaches a special &quot;end of file&quot; token or an error, it stops. For example, if we run the interpreter on this program:</p>
+<pre class="lox"><code>print 1 + 2;</code></pre>
+<p>It prints out:</p>
+<pre class="text"><code>1 31 &#x27;print&#x27;
+   | 21 &#x27;1&#x27;
+   |  7 &#x27;+&#x27;
+   | 21 &#x27;2&#x27;
+   |  8 &#x27;;&#x27;
+   2 39 &#x27;&#x27;</code></pre>
+<p>The first column is the line number, the second is the numeric value of the token &lt;span name=&quot;token&quot;&gt;type&lt;/span&gt;, and then finally the lexeme. That last empty lexeme on line 2 is the EOF token.</p>
+<p>&lt;aside name=&quot;token&quot;&gt;</p>
+<p>Yeah, the raw index of the token type isn&#x27;t exactly human readable, but it&#x27;s all C gives us.</p>
+<p>&lt;/aside&gt;</p>
+<p>The goal for the rest of the chapter is to make that blob of code work by implementing this key function:</p>
+<p>^code scan-token-h (1 before, 2 after)</p>
+<p>Each call scans and returns the next token in the source code. A token looks like this:</p>
+<p>^code token-struct (1 before, 2 after)</p>
+<p>It&#x27;s pretty similar to jlox&#x27;s Token class. We have an enum identifying what type of token it is -- number, identifier, <code>+</code> operator, etc. The enum is virtually identical to the one in jlox, so let&#x27;s just hammer out the whole thing.</p>
+<p>^code token-type (2 before, 2 after)</p>
+<p>Aside from prefixing all the names with <code>TOKEN_</code> (since C tosses enum names in the top-level namespace) the only difference is that extra <code>TOKEN_ERROR</code> type. What&#x27;s that about?</p>
+<p>There are only a couple of errors that get detected during scanning: unterminated strings and unrecognized characters. In jlox, the scanner reports those itself. In clox, the scanner produces a synthetic &quot;error&quot; token for that error and passes it over to the compiler. This way, the compiler knows an error occurred and can kick off error recovery before reporting it.</p>
+<p>The novel part in clox&#x27;s Token type is how it represents the lexeme. In jlox, each Token stored the lexeme as its own separate little Java string. If we did that for clox, we&#x27;d have to figure out how to manage the memory for those strings. That&#x27;s especially hard since we pass tokens by value -- multiple tokens could point to the same lexeme string. Ownership gets weird.</p>
+<p>Instead, we use the original source string as our character store. We represent a lexeme by a pointer to its first character and the number of characters it contains. This means we don&#x27;t need to worry about managing memory for lexemes at all and we can freely copy tokens around. As long as the main source code string &lt;span name=&quot;outlive&quot;&gt;outlives&lt;/span&gt; all of the tokens, everything works fine.</p>
+<p>&lt;aside name=&quot;outlive&quot;&gt;</p>
+<p>I don&#x27;t mean to sound flippant. We really do need to think about and ensure that the source string, which is created far away over in the &quot;main&quot; module, has a long enough lifetime. That&#x27;s why <code>runFile()</code> doesn&#x27;t free the string until <code>interpret()</code> finishes executing the code and returns.</p>
+<p>&lt;/aside&gt;</p>
+<h3>Scanning tokens</h3>
+<p>We&#x27;re ready to scan some tokens. We&#x27;ll work our way up to the complete implementation, starting with this:</p>
+<p>^code scan-token</p>
+<p>Since each call to this function scans a complete token, we know we are at the beginning of a new token when we enter the function. Thus, we set <code>scanner.start</code> to point to the current character so we remember where the lexeme we&#x27;re about to scan starts.</p>
+<p>Then we check to see if we&#x27;ve reached the end of the source code. If so, we return an EOF token and stop. This is a sentinel value that signals to the compiler to stop asking for more tokens.</p>
+<p>If we aren&#x27;t at the end, we do some... stuff... to scan the next token. But we haven&#x27;t written that code yet. We&#x27;ll get to that soon. If that code doesn&#x27;t successfully scan and return a token, then we reach the end of the function. That must mean we&#x27;re at a character that the scanner can&#x27;t recognize, so we return an error token for that.</p>
+<p>This function relies on a couple of helpers, most of which are familiar from jlox. First up:</p>
+<p>^code is-at-end</p>
+<p>We require the source string to be a good null-terminated C string. If the current character is the null byte, then we&#x27;ve reached the end.</p>
+<p>To create a token, we have this constructor-like function:</p>
+<p>^code make-token</p>
+<p>It uses the scanner&#x27;s <code>start</code> and <code>current</code> pointers to capture the token&#x27;s lexeme. It sets a couple of other obvious fields then returns the token. It has a sister function for returning error tokens.</p>
+<p>^code error-token</p>
+<p>&lt;span name=&quot;axolotl&quot;&gt;&lt;/span&gt;</p>
+<p>&lt;aside name=&quot;axolotl&quot;&gt;</p>
+<p>This part of the chapter is pretty dry, so here&#x27;s a picture of an axolotl.</p>
+<p>&lt;img src=&quot;image/scanning-on-demand/axolotl.png&quot; alt=&quot;A drawing of an axolotl.&quot; /&gt;</p>
+<p>&lt;/aside&gt;</p>
+<p>The only difference is that the &quot;lexeme&quot; points to the error message string instead of pointing into the user&#x27;s source code. Again, we need to ensure that the error message sticks around long enough for the compiler to read it. In practice, we only ever call this function with C string literals. Those are constant and eternal, so we&#x27;re fine.</p>
+<p>What we have now is basically a working scanner for a language with an empty lexical grammar. Since the grammar has no productions, every character is an error. That&#x27;s not exactly a fun language to program in, so let&#x27;s fill in the rules.</p>
+<h2>A Lexical Grammar for Lox</h2>
+<p>The simplest tokens are only a single character. We recognize those like so:</p>
+<p>^code scan-char (1 before, 2 after)</p>
+<p>We read the next character from the source code, and then do a straightforward switch to see if it matches any of Lox&#x27;s one-character lexemes. To read the next character, we use a new helper which consumes the current character and returns it.</p>
+<p>^code advance</p>
+<p>Next up are the two-character punctuation tokens like <code>!=</code> and <code>&gt;=</code>. Each of these also has a corresponding single-character token. That means that when we see a character like <code>!</code>, we don&#x27;t know if we&#x27;re in a <code>!</code> token or a <code>!=</code> until we look at the next character too. We handle those like so:</p>
+<p>^code two-char (1 before, 1 after)</p>
+<p>After consuming the first character, we look for an <code>=</code>. If found, we consume it and return the corresponding two-character token. Otherwise, we leave the current character alone (so it can be part of the <em>next</em> token) and return the appropriate one-character token.</p>
+<p>That logic for conditionally consuming the second character lives here:</p>
+<p>^code match</p>
+<p>If the current character is the desired one, we advance and return <code>true</code>. Otherwise, we return <code>false</code> to indicate it wasn&#x27;t matched.</p>
+<p>Now our scanner supports all of the punctuation-like tokens. Before we get to the longer ones, let&#x27;s take a little side trip to handle characters that aren&#x27;t part of a token at all.</p>
+<h3>Whitespace</h3>
+<p>Our scanner needs to handle spaces, tabs, and newlines, but those characters don&#x27;t become part of any token&#x27;s lexeme. We could check for those inside the main character switch in <code>scanToken()</code> but it gets a little tricky to ensure that the function still correctly finds the next token <em>after</em> the whitespace when you call it. We&#x27;d have to wrap the whole body of the function in a loop or something.</p>
+<p>Instead, before starting the token, we shunt off to a separate function.</p>
+<p>^code call-skip-whitespace (1 before, 1 after)</p>
+<p>This advances the scanner past any leading whitespace. After this call returns, we know the very next character is a meaningful one (or we&#x27;re at the end of the source code).</p>
+<p>^code skip-whitespace</p>
+<p>It&#x27;s sort of a separate mini-scanner. It loops, consuming every whitespace character it encounters. We need to be careful that it does <em>not</em> consume any <em>non</em>-whitespace characters. To support that, we use this:</p>
+<p>^code peek</p>
+<p>This simply returns the current character, but doesn&#x27;t consume it. The previous code handles all the whitespace characters except for newlines.</p>
+<p>^code newline (1 before, 2 after)</p>
+<p>When we consume one of those, we also bump the current line number.</p>
+<h3>Comments</h3>
+<p>Comments aren&#x27;t technically &quot;whitespace&quot;, if you want to get all precise with your terminology, but as far as Lox is concerned, they may as well be, so we skip those too.</p>
+<p>^code comment (1 before, 2 after)</p>
+<p>Comments start with <code>//</code> in Lox, so as with <code>!=</code> and friends, we need a second character of lookahead. However, with <code>!=</code>, we still wanted to consume the <code>!</code> even if the <code>=</code> wasn&#x27;t found. Comments are different. If we don&#x27;t find a second <code>/</code>, then <code>skipWhitespace()</code> needs to not consume the <em>first</em> slash either.</p>
+<p>To handle that, we add:</p>
+<p>^code peek-next</p>
+<p>This is like <code>peek()</code> but for one character past the current one. If the current character and the next one are both <code>/</code>, we consume them and then any other characters until the next newline or the end of the source code.</p>
+<p>We use <code>peek()</code> to check for the newline but not consume it. That way, the newline will be the current character on the next turn of the outer loop in <code>skipWhitespace()</code> and we&#x27;ll recognize it and increment <code>scanner.line</code>.</p>
+<h3>Literal tokens</h3>
+<p>Number and string tokens are special because they have a runtime value associated with them. We&#x27;ll start with strings because they are easy to recognize -- they always begin with a double quote.</p>
+<p>^code scan-string (1 before, 1 after)</p>
+<p>That calls a new function.</p>
+<p>^code string</p>
+<p>Similar to jlox, we consume characters until we reach the closing quote. We also track newlines inside the string literal. (Lox supports multi-line strings.) And, as ever, we gracefully handle running out of source code before we find the end quote.</p>
+<p>The main change here in clox is something that&#x27;s <em>not</em> present. Again, it relates to memory management. In jlox, the Token class had a field of type Object to store the runtime value converted from the literal token&#x27;s lexeme.</p>
+<p>Implementing that in C would require a lot of work. We&#x27;d need some sort of union and type tag to tell whether the token contains a string or double value. If it&#x27;s a string, we&#x27;d need to manage the memory for the string&#x27;s character array somehow.</p>
+<p>Instead of adding that complexity to the scanner, we defer &lt;span name=&quot;convert&quot;&gt;converting&lt;/span&gt; the literal lexeme to a runtime value until later. In clox, tokens only store the lexeme -- the character sequence exactly as it appears in the user&#x27;s source code. Later in the compiler, we&#x27;ll convert that lexeme to a runtime value right when we are ready to store it in the chunk&#x27;s constant table.</p>
+<p>&lt;aside name=&quot;convert&quot;&gt;</p>
+<p>Doing the lexeme-to-value conversion in the compiler does introduce some redundancy. The work to scan a number literal is awfully similar to the work required to convert a sequence of digit characters to a number value. But there isn&#x27;t <em>that</em> much redundancy, it isn&#x27;t in anything performance critical, and it keeps our scanner simpler.</p>
+<p>&lt;/aside&gt;</p>
+<p>Next up, numbers. Instead of adding a switch case for each of the ten digits that can start a number, we handle them here:</p>
+<p>^code scan-number (1 before, 2 after)</p>
+<p>That uses this obvious utility function:</p>
+<p>^code is-digit</p>
+<p>We finish scanning the number using this:</p>
+<p>^code number</p>
+<p>It&#x27;s virtually identical to jlox&#x27;s version except, again, we don&#x27;t convert the lexeme to a double yet.</p>
+<h2>Identifiers and Keywords</h2>
+<p>The last batch of tokens are identifiers, both user-defined and reserved. This section should be fun -- the way we recognize keywords in clox is quite different from how we did it in jlox, and touches on some important data structures.</p>
+<p>First, though, we have to scan the lexeme. Names start with a letter or underscore.</p>
+<p>^code scan-identifier (1 before, 1 after)</p>
+<p>We recognize those using this:</p>
+<p>^code is-alpha</p>
+<p>Once we&#x27;ve found an identifier, we scan the rest of it here:</p>
+<p>^code identifier</p>
+<p>After the first letter, we allow digits too, and we keep consuming alphanumerics until we run out of them. Then we produce a token with the proper type. Determining that &quot;proper&quot; type is the unique part of this chapter.</p>
+<p>^code identifier-type</p>
+<p>Okay, I guess that&#x27;s not very exciting yet. That&#x27;s what it looks like if we have no reserved words at all. How should we go about recognizing keywords? In jlox, we stuffed them all in a Java Map and looked them up by name. We don&#x27;t have any sort of hash table structure in clox, at least not yet.</p>
+<p>A hash table would be overkill anyway. To look up a string in a hash &lt;span name=&quot;hash&quot;&gt;table&lt;/span&gt;, we need to walk the string to calculate its hash code, find the corresponding bucket in the hash table, and then do a character-by-character equality comparison on any string it happens to find there.</p>
+<p>&lt;aside name=&quot;hash&quot;&gt;</p>
+<p>Don&#x27;t worry if this is unfamiliar to you. When we get to [building our own hash table from scratch][hash</p>
+<p>], we&#x27;ll learn all about it in exquisite detail.</p>
+<p>[hash]: hash-tables.html</p>
+<p>&lt;/aside&gt;</p>
+<p>Let&#x27;s say we&#x27;ve scanned the identifier &quot;gorgonzola&quot;. How much work <em>should</em> we need to do to tell if that&#x27;s a reserved word? Well, no Lox keyword starts with &quot;g&quot;, so looking at the first character is enough to definitively answer no. That&#x27;s a lot simpler than a hash table lookup.</p>
+<p>What about &quot;cardigan&quot;? We do have a keyword in Lox that starts with &quot;c&quot;: &quot;class&quot;. But the second character in &quot;cardigan&quot;, &quot;a&quot;, rules that out. What about &quot;forest&quot;? Since &quot;for&quot; is a keyword, we have to go farther in the string before we can establish that we don&#x27;t have a reserved word. But, in most cases, only a character or two is enough to tell we&#x27;ve got a user-defined name on our hands. We should be able to recognize that and fail fast.</p>
+<p>Here&#x27;s a visual representation of that branching character-inspection logic:</p>
+<p>&lt;span name=&quot;down&quot;&gt;&lt;/span&gt;</p>
+<p>&lt;img src=&quot;image/scanning-on-demand/keywords.png&quot; alt=&quot;A trie that contains all of Lox&#x27;s keywords.&quot; /&gt;</p>
+<p>&lt;aside name=&quot;down&quot;&gt;</p>
+<p>Read down each chain of nodes and you&#x27;ll see Lox&#x27;s keywords emerge.</p>
+<p>&lt;/aside&gt;</p>
+<p>We start at the root node. If there is a child node whose letter matches the first character in the lexeme, we move to that node. Then repeat for the next letter in the lexeme and so on. If at any point the next letter in the lexeme doesn&#x27;t match a child node, then the identifier must not be a keyword and we stop. If we reach a double-lined box, and we&#x27;re at the last character of the lexeme, then we found a keyword.</p>
+<h3>Tries and state machines</h3>
+<p>This tree diagram is an example of a thing called a &lt;span name=&quot;trie&quot;&gt;[<strong>trie</strong>][trie</p>
+<p>]&lt;/span&gt;. A trie stores a set of strings. Most other data structures for storing strings contain the raw character arrays and then wrap them inside some larger construct that helps you search faster. A trie is different. Nowhere in the trie will you find a whole string.</p>
+<p>[trie]: https://en.wikipedia.org/wiki/Trie</p>
+<p>&lt;aside name=&quot;trie&quot;&gt;</p>
+<p>&quot;Trie&quot; is one of the most confusing names in CS. Edward Fredkin yanked it out of the middle of the word &quot;retrieval&quot;, which means it should be pronounced like &quot;tree&quot;. But, uh, there is already a pretty important data structure pronounced &quot;tree&quot; <em>which tries are a special case of</em>, so unless you never speak of these things out loud, no one can tell which one you&#x27;re talking about. Thus, people these days often pronounce it like &quot;try&quot; to avoid the headache.</p>
+<p>&lt;/aside&gt;</p>
+<p>Instead, each string the trie &quot;contains&quot; is represented as a <em>path</em> through the tree of character nodes, as in our traversal above. Nodes that match the last character in a string have a special marker -- the double lined boxes in the illustration. That way, if your trie contains, say, &quot;banquet&quot; and &quot;ban&quot;, you are able to tell that it does <em>not</em> contain &quot;banque&quot; -- the &quot;e&quot; node won&#x27;t have that marker, while the &quot;n&quot; and &quot;t&quot; nodes will.</p>
+<p>Tries are a special case of an even more fundamental data structure: a [<strong>deterministic finite automaton</strong>][dfa</p>
+<p>] (<strong>DFA</strong>). You might also know these by other names: <strong>finite state machine</strong>, or just <strong>state machine</strong>. State machines are rad. They end up useful in everything from [game programming][state</p>
+<p>] to implementing networking protocols.</p>
+<p>[dfa]: https://en.wikipedia.org/wiki/Deterministic_finite_automaton [state</p>
+<p>]: http://gameprogrammingpatterns.com/state.html</p>
+<p>In a DFA, you have a set of <em>states</em> with <em>transitions</em> between them, forming a graph. At any point in time, the machine is &quot;in&quot; exactly one state. It gets to other states by following transitions. When you use a DFA for lexical analysis, each transition is a character that gets matched from the string. Each state represents a set of allowed characters.</p>
+<p>Our keyword tree is exactly a DFA that recognizes Lox keywords. But DFAs are more powerful than simple trees because they can be arbitrary <em>graphs</em>. Transitions can form cycles between states. That lets you recognize arbitrarily long strings. For example, here&#x27;s a DFA that recognizes number literals:</p>
+<p>&lt;span name=&quot;railroad&quot;&gt;&lt;/span&gt;</p>
+<p>&lt;img src=&quot;image/scanning-on-demand/numbers.png&quot; alt=&quot;A syntax diagram that recognizes integer and floating point literals.&quot; /&gt;</p>
+<p>&lt;aside name=&quot;railroad&quot;&gt;</p>
+<p>This style of diagram is called a [<strong>syntax diagram</strong>][syntax diagram</p>
+<p>] or the more charming <strong>railroad diagram</strong>. The latter name is because it looks something like a switching yard for trains.</p>
+<p>Back before Backus-Naur Form was a thing, this was one of the predominant ways of documenting a language&#x27;s grammar. These days, we mostly use text, but there&#x27;s something delightful about the official specification for a <em>textual language</em> relying on an <em>image</em>.</p>
+<p>[syntax diagram]: https://en.wikipedia.org/wiki/Syntax_diagram</p>
+<p>&lt;/aside&gt;</p>
+<p>I&#x27;ve collapsed the nodes for the ten digits together to keep it more readable, but the basic process works the same -- you work through the path, entering nodes whenever you consume a corresponding character in the lexeme. If we were so inclined, we could construct one big giant DFA that does <em>all</em> of the lexical analysis for Lox, a single state machine that recognizes and spits out all of the tokens we need.</p>
+<p>However, crafting that mega-DFA by &lt;span name=&quot;regex&quot;&gt;hand&lt;/span&gt; would be challenging. That&#x27;s why [Lex][</p>
+<p>] was created. You give it a simple textual description of your lexical grammar -- a bunch of regular expressions -- and it automatically generates a DFA for you and produces a pile of C code that implements it.</p>
+<p>[lex]: https://en.wikipedia.org/wiki/Lex_(software)</p>
+<p>&lt;aside name=&quot;regex&quot;&gt;</p>
+<p>This is also how most regular expression engines in programming languages and text editors work under the hood. They take your regex string and convert it to a DFA, which they then use to match strings.</p>
+<p>If you want to learn the algorithm to convert a regular expression into a DFA, [the dragon book][dragon</p>
+<p>] has you covered.</p>
+<p>[dragon]: https://en.wikipedia.org/wiki/Compilers:_Principles,_Techniques,_and_Tools</p>
+<p>&lt;/aside&gt;</p>
+<p>We won&#x27;t go down that road. We already have a perfectly serviceable hand-rolled scanner. We just need a tiny trie for recognizing keywords. How should we map that to code?</p>
+<p>The absolute simplest &lt;span name=&quot;v8&quot;&gt;solution&lt;/span&gt; is to use a switch statement for each node with cases for each branch. We&#x27;ll start with the root node and handle the easy keywords.</p>
+<p>&lt;aside name=&quot;v8&quot;&gt;</p>
+<p>Simple doesn&#x27;t mean dumb. The same approach is [essentially what V8 does][v8</p>
+<p>], and that&#x27;s currently one of the world&#x27;s most sophisticated, fastest language implementations.</p>
+<p>[v8]: https://github.com/v8/v8/blob/e77eebfe3b747fb315bd3baad09bec0953e53e68/src/parsing/scanner.cc#L1643</p>
+<p>&lt;/aside&gt;</p>
+<p>^code keywords (1 before, 1 after)</p>
+<p>These are the initial letters that correspond to a single keyword. If we see an &quot;s&quot;, the only keyword the identifier could possibly be is <code>super</code>. It might not be, though, so we still need to check the rest of the letters too. In the tree diagram, this is basically that straight path hanging off the &quot;s&quot;.</p>
+<p>We won&#x27;t roll a switch for each of those nodes. Instead, we have a utility function that tests the rest of a potential keyword&#x27;s lexeme.</p>
+<p>^code check-keyword</p>
+<p>We use this for all of the unbranching paths in the tree. Once we&#x27;ve found a prefix that could only be one possible reserved word, we need to verify two things. The lexeme must be exactly as long as the keyword. If the first letter is &quot;s&quot;, the lexeme could still be &quot;sup&quot; or &quot;superb&quot;. And the remaining characters must match exactly -- &quot;supar&quot; isn&#x27;t good enough.</p>
+<p>If we do have the right number of characters, and they&#x27;re the ones we want, then it&#x27;s a keyword, and we return the associated token type. Otherwise, it must be a normal identifier.</p>
+<p>We have a couple of keywords where the tree branches again after the first letter. If the lexeme starts with &quot;f&quot;, it could be <code>false</code>, <code>for</code>, or <code>fun</code>. So we add another switch for the branches coming off the &quot;f&quot; node.</p>
+<p>^code keyword-f (1 before, 1 after)</p>
+<p>Before we switch, we need to check that there even <em>is</em> a second letter. &quot;f&quot; by itself is a valid identifier too, after all. The other letter that branches is &quot;t&quot;.</p>
+<p>^code keyword-t (1 before, 1 after)</p>
+<p>That&#x27;s it. A couple of nested <code>switch</code> statements. Not only is this code &lt;span name=&quot;short&quot;&gt;short&lt;/span&gt;, but it&#x27;s very, very fast. It does the minimum amount of work required to detect a keyword, and bails out as soon as it can tell the identifier will not be a reserved one.</p>
+<p>And with that, our scanner is complete.</p>
+<p>&lt;aside name=&quot;short&quot;&gt;</p>
+<p>We sometimes fall into the trap of thinking that performance comes from complicated data structures, layers of caching, and other fancy optimizations. But, many times, all that&#x27;s required is to do less work, and I often find that writing the simplest code I can is sufficient to accomplish that.</p>
+<p>&lt;/aside&gt;</p>
+<p>&lt;div class=&quot;challenges&quot;&gt;</p>
+<h2>Challenges</h2>
+<p>1.  Many newer languages support [<strong>string interpolation</strong>][interp</p>
+<p>]. Inside a     string literal, you have some sort of special delimiters -- most commonly     <code>${</code> at the beginning and <code>}</code> at the end. Between those delimiters, any     expression can appear. When the string literal is executed, the inner     expression is evaluated, converted to a string, and then merged with the     surrounding string literal.</p>
+<p>    For example, if Lox supported string interpolation, then this...</p>
+<p>    <code></code>`lox     var drink = &quot;Tea&quot;;     var steep = 4;     var cool = 2;     print &quot;${drink} will be ready in ${steep + cool} minutes.&quot;;     <code></code>`</p>
+<p>    ...would print:</p>
+<p>    <code></code>`text     Tea will be ready in 6 minutes.     <code></code>`</p>
+<p>    What token types would you define to implement a scanner for string     interpolation? What sequence of tokens would you emit for the above string     literal?</p>
+<p>    What tokens would you emit for:</p>
+<p>    <code></code>`text     &quot;Nested ${&quot;interpolation?! Are you ${&quot;mad?!&quot;}&quot;}&quot;     <code></code>`</p>
+<p>    Consider looking at other language implementations that support     interpolation to see how they handle it.</p>
+<p>2.  Several languages use angle brackets for generics and also have a <code>&gt;&gt;</code> right     shift operator. This led to a classic problem in early versions of C++:</p>
+<p>    <code></code>`c++     vector&lt;vector&lt;string&gt;&gt; nestedVectors;     <code></code>`</p>
+<p>    This would produce a compile error because the <code>&gt;&gt;</code> was lexed to a single     right shift token, not two <code>&gt;</code> tokens. Users were forced to avoid this by     putting a space between the closing angle brackets.</p>
+<p>    Later versions of C++ are smarter and can handle the above code. Java and C#     never had the problem. How do those languages specify and implement this?</p>
+<p>3.  Many languages, especially later in their evolution, define &quot;contextual     keywords&quot;. These are identifiers that act like reserved words in some     contexts but can be normal user-defined identifiers in others.</p>
+<p>    For example, <code>await</code> is a keyword inside an <code>async</code> method in C#, but     in other methods, you can use <code>await</code> as your own identifier.</p>
+<p>    Name a few contextual keywords from other languages, and the context where     they are meaningful. What are the pros and cons of having contextual     keywords? How would you implement them in your language&#x27;s front end if you     needed to?</p>
+<p>[interp]: https://en.wikipedia.org/wiki/String_interpolation</p>
+<p>&lt;/div&gt; </p>
