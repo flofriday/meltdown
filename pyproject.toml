@@ -30,6 +30,9 @@ source = ["meltdown"]
 [tool.ruff.lint]
 select = ["E", "F", "UP", "B", "SIM", "I"]
 
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["E501"]
+
 [tool.ty.environment]
 python = ".venv"
 
@@ -39,9 +42,9 @@ exclude = ["venv", ".venv", "**/resources"]
 [dependency-groups]
 dev = [
     "inline-snapshot>=0.32.5",
-    "pygments>=2.19.2",
+    "pygments>=2.20.0",
     "pytest>=9.0.2",
-    "ruff>=0.12.11",
-    "twine>=6.1.0",
-    "ty>=0.0.1a19",
+    "ruff>=0.15.8",
+    "twine>=6.2.0",
+    "ty>=0.0.26",
 ]

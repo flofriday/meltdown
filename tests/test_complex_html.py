@@ -2,12 +2,10 @@ import html
 from textwrap import dedent
 from typing import Self
 
-from inline_snapshot import external_file, register_format_alias, snapshot
+from inline_snapshot import external_file, snapshot
 
 from src.meltdown import HtmlRenderer, parse
-from src.meltdown.Nodes import *
-
-register_format_alias(".html", ".txt")
+from src.meltdown.Nodes import BoldNode, CodeBlockNode
 
 
 def produce(input: str) -> str:
@@ -71,7 +69,9 @@ def test_extend_for_highlightjs():
 
 def test_extend_with_pygemnts():
     from pygments import highlight
-    from pygments.formatters import HtmlFormatter
+    from pygments.formatters import (
+        HtmlFormatter,  # ty: ignore[unresolved-import] # FIXME: This seems to be a bug
+    )
     from pygments.lexers import get_lexer_by_name
 
     formatter = HtmlFormatter(style="monokai", cssclas="highlight")
