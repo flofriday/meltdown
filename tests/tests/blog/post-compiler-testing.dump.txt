@@ -1,4 +1,6 @@
-MarkdownTree metadata:{'title': 'Compiler testing can be even more fun actually', 'date': '2026-03-24', 'image': 'some_image_for_social_preview.png', 'description': 'This is just a new post.', 'draft': 'true'}
+MarkdownTree metadata:{'title': 'Compiler testing can be even more fun actually', 'date': '2026-03-29', 'image': 'some_image_for_social_preview.png', 'description': 'Compilers must be stable, really stable, but at least we can make testing them a lot of fun.', 'draft': 'true'}
+    Paragraph
+        CommentNode " NOTES: Add social image "
     Paragraph
         TextNode "This post is mostly a response to Giacomo's amazing article "
         LinkNode url: https://giacomocavalieri.me/writing/testing-can-be-fun-actually
@@ -11,15 +13,118 @@ MarkdownTree metadata:{'title': 'Compiler testing can be even more fun actually'
             TextNode "because"
         TextNode " I saw a talk from Giacomo, so thanks again."
     Paragraph
-        TextNode "All of this to say the post is amazing, go read it if you haven't yet but maybe we can improve upon this because..."
+        TextNode "All of this to say the post is amazing, go read it if you haven't yet but maybe we can improve upon this, especially for compiler tests, because..."
     HeaderNode size:2
         TextNode "Code isn't just like any other text"
     Paragraph
         TextNode "One of the examples Giacomo uses is a test for Gleam's LSP and inside the Gleam compiler there are also many testcases for errors that use snapshot testing."
     Paragraph
-        BoldNode
-            TextNode "img"
+        ImageNode url: gleam-snapshot-before.png, description: 'Gleam Snapshot before'
     Paragraph
         TextNode "This is how such a test looks like for the gleam compiler. To be fair it's pretty readable but the thing that keeps bothering me is that there is no syntax highlighting and that the very LSP in my IDE doesn't recognize this file as Gleam.\nAnd even if I force my editor to interpret the file as Gleam it won't work perfectly because the additional frontmatter at the top and the diagnostic output at the bottom doesn't make it valid gleam syntax. "
     Paragraph
-        TextNode "The good thing though is that nothing here is set in stone. So if we modify the snapshot framework a bit the snapshot could look like:\n"
+        TextNode "The good thing though is that nothing here is set in stone and so if we modify the snapshot framework a bit the snapshot could look like:"
+    Paragraph
+        ImageNode url: gleam-snapshot-after.png, description: 'Gleam Snapshot after'
+    Paragraph
+        TextNode "I really like this format, the code looks and feels like code, the whole \nsnapshot is a valid file that the compiler can understand and since we also\nrenamed the file from "
+        CodeNode code:'.snap'
+        TextNode " to "
+        CodeNode code:'.gleam'
+        TextNode " suffix we also get syntax\nhighlighting for free. Even better since this test tests the LSP, we can \neven quickly verify the test in our editor by simply hovering over the mentioned\nvariable."
+    Paragraph
+        ImageNode url: gleam-snapshot-hover.png, description: 'Gleam Snapshot hover'
+    Paragraph
+        TextNode "... well I kinda lied to you here, I couldn't actually get this to work with \nGleam because the LSP wouldn't trigger in the snapshot file. I "
+        EmphNode
+            TextNode "assume"
+        TextNode " this is\nbecause Gleam doesn't do loose files and all files must be handled in the\ncontext of a project and otherwise the LSP won't handle them as well."
+    Paragraph
+        TextNode "But if your LSP can handle loose files this can be nice bonus."
+    Paragraph
+        TextNode "A couple of months ago when I designed the snapshot tests for "
+        LinkNode url: https://github.com/OpenVADL/openvadl
+            TextNode "OpenVADL"
+        TextNode " \n(the compiler I currently spend most my time with) I choose exactly this format \nand so far we're beyond happy with it. "
+    Paragraph
+        TextNode "Since our LSP is still quite young and doesn't have any hover support yet, I \ncannot show you the same test for OpenVADL, but we do have quite a few tests\nfor compiler errors:"
+    Paragraph
+        ImageNode url: vadl-snapshot.png, description: 'OpenVadl Snapshot'
+    Paragraph
+        TextNode "Working with these is just a bliss, the editor already adds squiggly lines to\nthe expression causing an error and again you can quickly verify the reported\nerror by hovering over the section."
+    Paragraph
+        TextNode "Many of the tests only verify which errors are thrown and or if a successful compilation is possible, but they can also include AST dumps or VIAM (our custom IR) dumps."
+    Paragraph
+        TextNode "Honestly, that's the gist of what I wanted to say, everything that follows is \nmuch less of a suggestion and more of a this is how we do testing in OpenVADL\nright now and is fun right now but might come back to bite us in the ass later."
+    HeaderNode size:2
+        TextNode "Taking it even further - one test one file"
+    Paragraph
+        TextNode "Let's take another look at the OpenVADL example above, as you can see it already\ncontains the whole input we want to test. So instead of the file just being the\nsnapshot content that we verify against it actually is the whole test. There is\nthen also the "
+        CodeNode code:'FrontendSnapshotTest'
+        TextNode " class that loads all files in a specified \nfolder and executes them. "
+    Paragraph
+        TextNode "While the "
+        LinkNode url: https://github.com/OpenVADL/openvadl/blob/732888d6e92ff29ba51f7d391eeff12983e04955/vadl/test/vadl/ast/FrontendSnapshotTests.java#L55
+            TextNode "actual implementation"
+        TextNode " of this parameterized test is too large to\nmention here, it basically does the following:"
+    Paragraph
+        ImageNode url: architecture.svg, description: 'Architecture Diagram'
+    Paragraph
+        TextNode "This makes adding new tests as hard as copy-pasting a file into the correct\nfolder."
+    Paragraph
+        TextNode "To add a special dump (like AST or IR) to the snapshot the test only have to include a special comment like "
+        CodeNode code:'// INCLUDE-AST-DUMP'
+        TextNode "."
+    Paragraph
+        TextNode "Unfortunately, this has one drawback, for which I don't have any clean solution,\nin that you cannot easily run just a single snapshot test, but you have to\nrun the whole suite (unless you want to spend minutes figuring out the right\ngradle test command)."
+    Paragraph
+        TextNode "At the time of writing the whole 170 testsuite takes ~450ms on my machine so\nrunning them all, isn't really that much of a slow down but it might become one \nin the future."
+    Paragraph
+        TextNode "The Kotlin repository also has many snapshots tests, which do take a lot \nlonger to run, so to easily run a single test, they don't simply load all the \nfiles dynamically in a folder but instead have a generator script that generates\ntestsuites (Kotlin code) where each test method handles on of the files. Adding new tests now \nalso requires you to generate the tests, and even as you get used\nto it, it adds just a bit more friction (in CI there is a check that verifies that you \nnever actually forgot to run the script before you merge)."
+    Paragraph
+        TextNode "But normally you don't even use these generated tests directly, instead there is\na "
+        LinkNode url: https://plugins.jetbrains.com/plugin/27616-kotlin-compiler-devkit
+            TextNode "custom IntelliJ Kotlin Development plugin"
+        TextNode " that automatically detects if you have such a snapshot\ntest open and injects a custom UI to run the test."
+    Paragraph
+        ImageNode url: kotlin-ide-plugin.png, description: 'Kotlin IDE plugin UI'
+    Paragraph
+        TextNode "So far, investing that much into custom tooling wasn't necessary yet for \nOpenVADL but I think in the future building such a plugin is a real option."
+    HeaderNode size:2
+        TextNode "A bit of IDE Magic "
+    Paragraph
+        TextNode "One of the big advantages of snapshot tests is that they easily adapt to changes\nin the output. The most common case for us is when adding a new tests for the\nfirst time, the generated comment at the end probably won't be in the file you \ndropped into the test folder."
+    Paragraph
+        TextNode "But by throwing a very specific exception ("
+        CodeNode code:'org.opentest4j.AssertionFailedError'
+        TextNode ") in "
+        LinkNode url: https://github.com/OpenVADL/openvadl/blob/732888d6e92ff29ba51f7d391eeff12983e04955/vadl/test/vadl/TestUtils.java#L123-L135
+            TextNode "our test suite"
+        TextNode "\nwe do get help from IntelliJ, with a diff viewer \n(that's not "
+        EmphNode
+            TextNode "that"
+        TextNode " special) where you can accept the changes into the snapshot\n("
+        EmphNode
+            TextNode "this"
+        TextNode " is)."
+    Paragraph
+        TextNode "For example if in the previous OpenVADL snapshot we change "
+        CodeNode code:'String<99>'
+        TextNode " to \n"
+        CodeNode code:'String<27>'
+        TextNode " we get:"
+    Paragraph
+        ImageNode url: accept_changes.png, description: 'Accept changes screenshot'
+    Paragraph
+        TextNode "With a single mouse click we can accept the changes and we can move on to the \nnext task."
+    Paragraph
+        TextNode "I only discovered this behavior because I saw them first in a Kotlin test and \nwas immediately flashed by it, which then lead me down the road to reversing \nthose tests and recreating the behavior for OpenVADL."
+    Paragraph
+        TextNode "So unfortunately, if you don't use a JVM language I don't have a good tip for\nyou how to recreate this, but I'm sure that this can also be recreated in \nJetBrains's other IDEs."
+    HeaderNode size:2
+        TextNode "Adding a new test"
+    Paragraph
+        TextNode "While writing this post I found out that we don't have a test to call a function\nwith a typo yet. So there cannot be a better opportunity to showcase the breeze \nthat is adding a new test."
+    Paragraph
+        ImageNode url: add-snapshot.gif, description: 'Adding a snapshot'
+        TextNode "\n"

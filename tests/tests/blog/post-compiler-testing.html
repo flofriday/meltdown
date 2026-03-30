@@ -1,8 +1,43 @@
+<p><!-- NOTES: Add social image --></p>
 <p>This post is mostly a response to Giacomo&#x27;s amazing article <a href="https://giacomocavalieri.me/writing/testing-can-be-fun-actually"><em>Testing can be fun, actually</em></a> on snapshot testing. </p>
 <p>Over the last couple of months I also added snapshot testing to a couple of my projects and I&#x27;m beyond happy with the change. Not only that, but I&#x27;ve also noticed my behavior changing and that I intuitively added more test cases, since the burden to do so is a lot lower now. Actually my journey to snapshot testing only started <em>because</em> I saw a talk from Giacomo, so thanks again.</p>
-<p>All of this to say the post is amazing, go read it if you haven&#x27;t yet but maybe we can improve upon this because...</p>
+<p>All of this to say the post is amazing, go read it if you haven&#x27;t yet but maybe we can improve upon this, especially for compiler tests, because...</p>
 <h2>Code isn&#x27;t just like any other text</h2>
 <p>One of the examples Giacomo uses is a test for Gleam&#x27;s LSP and inside the Gleam compiler there are also many testcases for errors that use snapshot testing.</p>
-<p><strong>img</strong></p>
+<p><img src="gleam-snapshot-before.png" alt="Gleam Snapshot before"/></p>
 <p>This is how such a test looks like for the gleam compiler. To be fair it&#x27;s pretty readable but the thing that keeps bothering me is that there is no syntax highlighting and that the very LSP in my IDE doesn&#x27;t recognize this file as Gleam. And even if I force my editor to interpret the file as Gleam it won&#x27;t work perfectly because the additional frontmatter at the top and the diagnostic output at the bottom doesn&#x27;t make it valid gleam syntax. </p>
-<p>The good thing though is that nothing here is set in stone. So if we modify the snapshot framework a bit the snapshot could look like: </p>
+<p>The good thing though is that nothing here is set in stone and so if we modify the snapshot framework a bit the snapshot could look like:</p>
+<p><img src="gleam-snapshot-after.png" alt="Gleam Snapshot after"/></p>
+<p>I really like this format, the code looks and feels like code, the whole  snapshot is a valid file that the compiler can understand and since we also renamed the file from <code>.snap</code> to <code>.gleam</code> suffix we also get syntax highlighting for free. Even better since this test tests the LSP, we can  even quickly verify the test in our editor by simply hovering over the mentioned variable.</p>
+<p><img src="gleam-snapshot-hover.png" alt="Gleam Snapshot hover"/></p>
+<p>... well I kinda lied to you here, I couldn&#x27;t actually get this to work with  Gleam because the LSP wouldn&#x27;t trigger in the snapshot file. I <em>assume</em> this is because Gleam doesn&#x27;t do loose files and all files must be handled in the context of a project and otherwise the LSP won&#x27;t handle them as well.</p>
+<p>But if your LSP can handle loose files this can be nice bonus.</p>
+<p>A couple of months ago when I designed the snapshot tests for <a href="https://github.com/OpenVADL/openvadl">OpenVADL</a>  (the compiler I currently spend most my time with) I choose exactly this format  and so far we&#x27;re beyond happy with it. </p>
+<p>Since our LSP is still quite young and doesn&#x27;t have any hover support yet, I  cannot show you the same test for OpenVADL, but we do have quite a few tests for compiler errors:</p>
+<p><img src="vadl-snapshot.png" alt="OpenVadl Snapshot"/></p>
+<p>Working with these is just a bliss, the editor already adds squiggly lines to the expression causing an error and again you can quickly verify the reported error by hovering over the section.</p>
+<p>Many of the tests only verify which errors are thrown and or if a successful compilation is possible, but they can also include AST dumps or VIAM (our custom IR) dumps.</p>
+<p>Honestly, that&#x27;s the gist of what I wanted to say, everything that follows is  much less of a suggestion and more of a this is how we do testing in OpenVADL right now and is fun right now but might come back to bite us in the ass later.</p>
+<h2>Taking it even further - one test one file</h2>
+<p>Let&#x27;s take another look at the OpenVADL example above, as you can see it already contains the whole input we want to test. So instead of the file just being the snapshot content that we verify against it actually is the whole test. There is then also the <code>FrontendSnapshotTest</code> class that loads all files in a specified  folder and executes them. </p>
+<p>While the <a href="https://github.com/OpenVADL/openvadl/blob/732888d6e92ff29ba51f7d391eeff12983e04955/vadl/test/vadl/ast/FrontendSnapshotTests.java#L55">actual implementation</a> of this parameterized test is too large to mention here, it basically does the following:</p>
+<p><img src="architecture.svg" alt="Architecture Diagram"/></p>
+<p>This makes adding new tests as hard as copy-pasting a file into the correct folder.</p>
+<p>To add a special dump (like AST or IR) to the snapshot the test only have to include a special comment like <code>// INCLUDE-AST-DUMP</code>.</p>
+<p>Unfortunately, this has one drawback, for which I don&#x27;t have any clean solution, in that you cannot easily run just a single snapshot test, but you have to run the whole suite (unless you want to spend minutes figuring out the right gradle test command).</p>
+<p>At the time of writing the whole 170 testsuite takes ~450ms on my machine so running them all, isn&#x27;t really that much of a slow down but it might become one  in the future.</p>
+<p>The Kotlin repository also has many snapshots tests, which do take a lot  longer to run, so to easily run a single test, they don&#x27;t simply load all the  files dynamically in a folder but instead have a generator script that generates testsuites (Kotlin code) where each test method handles on of the files. Adding new tests now  also requires you to generate the tests, and even as you get used to it, it adds just a bit more friction (in CI there is a check that verifies that you  never actually forgot to run the script before you merge).</p>
+<p>But normally you don&#x27;t even use these generated tests directly, instead there is a <a href="https://plugins.jetbrains.com/plugin/27616-kotlin-compiler-devkit">custom IntelliJ Kotlin Development plugin</a> that automatically detects if you have such a snapshot test open and injects a custom UI to run the test.</p>
+<p><img src="kotlin-ide-plugin.png" alt="Kotlin IDE plugin UI"/></p>
+<p>So far, investing that much into custom tooling wasn&#x27;t necessary yet for  OpenVADL but I think in the future building such a plugin is a real option.</p>
+<h2>A bit of IDE Magic </h2>
+<p>One of the big advantages of snapshot tests is that they easily adapt to changes in the output. The most common case for us is when adding a new tests for the first time, the generated comment at the end probably won&#x27;t be in the file you  dropped into the test folder.</p>
+<p>But by throwing a very specific exception (<code>org.opentest4j.AssertionFailedError</code>) in <a href="https://github.com/OpenVADL/openvadl/blob/732888d6e92ff29ba51f7d391eeff12983e04955/vadl/test/vadl/TestUtils.java#L123-L135">our test suite</a> we do get help from IntelliJ, with a diff viewer  (that&#x27;s not <em>that</em> special) where you can accept the changes into the snapshot (<em>this</em> is).</p>
+<p>For example if in the previous OpenVADL snapshot we change <code>String&lt;99&gt;</code> to  <code>String&lt;27&gt;</code> we get:</p>
+<p><img src="accept_changes.png" alt="Accept changes screenshot"/></p>
+<p>With a single mouse click we can accept the changes and we can move on to the  next task.</p>
+<p>I only discovered this behavior because I saw them first in a Kotlin test and  was immediately flashed by it, which then lead me down the road to reversing  those tests and recreating the behavior for OpenVADL.</p>
+<p>So unfortunately, if you don&#x27;t use a JVM language I don&#x27;t have a good tip for you how to recreate this, but I&#x27;m sure that this can also be recreated in  JetBrains&#x27;s other IDEs.</p>
+<h2>Adding a new test</h2>
+<p>While writing this post I found out that we don&#x27;t have a test to call a function with a typo yet. So there cannot be a better opportunity to showcase the breeze  that is adding a new test.</p>
+<p><img src="add-snapshot.gif" alt="Adding a snapshot"/> </p>
